@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dimensionamiento del piloto — Puntaje determinístico para crédito cafetalero</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+<style>
+:root{--primary:#116AAB;--primary-light:#E5ECF4;--caption:#1C4767;--un-blue:#5792C9;--orange:#F58320;--gray-dark:#545454;--gray-medium:#767676;--gray-light:#E6E8EA;--white-fao:#F7F8F9;--font:"Open Sans","Helvetica Neue",Helvetica,Arial,sans-serif}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:76px}
+body{font-family:var(--font);color:var(--gray-dark);background:#fff;line-height:1.6;font-size:16px}
+a{color:var(--primary)}
+/* header */
+.topbar{position:fixed;top:0;left:0;right:0;height:60px;background:#fff;border-bottom:1px solid var(--gray-light);display:flex;align-items:center;gap:14px;padding:0 20px;z-index:30}
+.burger{width:42px;height:42px;border:0;background:transparent;border-radius:4px;cursor:pointer;display:flex;flex-direction:column;justify-content:center;align-items:center;gap:5px}
+.burger span{display:block;width:22px;height:2.5px;background:var(--caption);border-radius:2px;transition:transform .2s,opacity .2s}
+.burger:hover{background:var(--primary-light)}
+.burger:focus-visible{outline:2px solid var(--primary);outline-offset:2px}
+body.nav-open .burger span:nth-child(1){transform:translateY(7.5px) rotate(45deg)}
+body.nav-open .burger span:nth-child(2){opacity:0}
+body.nav-open .burger span:nth-child(3){transform:translateY(-7.5px) rotate(-45deg)}
+.topbar .t{font-size:14px;font-weight:700;color:var(--caption);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.topbar .v{margin-left:auto;font-size:12px;color:var(--gray-medium);white-space:nowrap}
+/* drawer */
+.drawer{position:fixed;top:60px;left:0;bottom:0;width:300px;max-width:85vw;background:#fff;border-right:1px solid var(--gray-light);transform:translateX(-100%);transition:transform .25s ease;z-index:25;overflow-y:auto;padding:18px 0}
+body.nav-open .drawer{transform:none}
+.drawer .eyebrow{padding:0 24px 10px}
+.drawer a{display:block;padding:10px 24px;font-size:14.5px;font-weight:600;color:var(--caption);text-decoration:none;border-left:3px solid transparent}
+.drawer a:hover{background:var(--white-fao);color:var(--primary)}
+.drawer a.active{border-left-color:var(--primary);color:var(--primary);background:var(--primary-light)}
+.drawer a .n{display:inline-block;width:26px;color:var(--gray-medium);font-weight:700}
+.scrim{position:fixed;inset:60px 0 0 0;background:rgba(28,71,103,.35);opacity:0;pointer-events:none;transition:opacity .25s;z-index:20}
+body.nav-open .scrim{opacity:1;pointer-events:auto}
+/* hero */
+.hero{margin-top:60px;background:var(--caption);color:#fff;padding:64px 24px 56px}
+.wrap{max-width:980px;margin:0 auto}
+.eyebrow{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--orange)}
+.hero .eyebrow{color:#FFC48F}
+.hero h1{font-size:clamp(28px,4.4vw,44px);line-height:1.15;font-weight:800;margin-top:10px;max-width:820px}
+.hero p{margin-top:16px;font-size:17px;color:#D4DEE8;max-width:700px}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:0;margin-top:36px;border-top:1px solid rgba(255,255,255,.2)}
+.stat{padding:18px 20px 0 0}
+.stat .n{font-size:32px;font-weight:800;line-height:1.1}
+.stat .l{font-size:13px;color:#D4DEE8;margin-top:4px}
+/* sections */
+main section{padding:56px 24px;border-bottom:1px solid var(--gray-light)}
+main section:nth-child(even){background:var(--white-fao)}
+h2{font-size:clamp(22px,3vw,28px);line-height:1.25;color:var(--caption);font-weight:700;margin:6px 0 14px}
+h3{font-size:17px;color:var(--primary);font-weight:700;margin:26px 0 8px}
+.lead{font-size:17px;max-width:820px;color:#3d3d3d}
+p+p{margin-top:10px}
+ul{margin:10px 0 0 20px}
+li{margin:5px 0}
+li::marker{color:var(--primary)}
+b,strong{color:var(--caption)}
+/* tables */
+.tbl{overflow-x:auto;margin:18px 0 6px;-webkit-overflow-scrolling:touch}
+table{border-collapse:collapse;width:100%;font-size:14px;background:#fff}
+th{background:var(--caption);color:#fff;font-weight:600;text-align:left;padding:10px 12px;white-space:nowrap}
+td{padding:9px 12px;border-bottom:1px solid var(--gray-light);vertical-align:top}
+td.num,th.num{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}
+tr.sub td{background:var(--primary-light);font-weight:700;color:var(--caption)}
+tr.total td{background:var(--caption);color:#fff;font-weight:700}
+tr.grp td{background:var(--white-fao);font-weight:700;color:var(--primary);text-transform:uppercase;font-size:12px;letter-spacing:.05em}
+.note{font-size:13px;color:var(--gray-medium);margin-top:8px}
+/* figures */
+figure{margin:24px 0 8px;background:#fff;border:1px solid var(--gray-light);padding:20px 20px 14px}
+figure .ft{font-size:15px;font-weight:700;color:var(--caption)}
+figure .fs{font-size:13px;color:var(--gray-medium);margin-top:2px}
+figure svg{display:block;width:100%;height:auto;margin-top:14px;font-family:var(--font)}
+figcaption{font-size:12.5px;color:var(--gray-medium);margin-top:10px}
+svg .grid{stroke:#E6E8EA}
+svg .axis{stroke:#999}
+svg .ref{stroke:#999;stroke-dasharray:4 4}
+svg .ref-accent{stroke:var(--orange);stroke-dasharray:4 4;stroke-width:1.4}
+svg .tick{font-size:11.5px;fill:#767676}
+svg .tick.sm{font-size:10.5px}
+svg .lbl{font-size:12.5px;font-weight:700;fill:var(--caption)}
+svg .lbl-n{font-size:13px;fill:#3d3d3d}
+svg .inbar{font-size:11.5px;fill:#fff;font-weight:600}
+svg .c-build{fill:#1C4767}
+svg .c-op{fill:#116AAB}
+svg .c-res{fill:#B8C4D0}
+svg .tl-bar{fill:#116AAB;fill-opacity:.18;stroke:#116AAB;stroke-width:1.2}
+svg .tl-ms{fill:#5792C9}
+svg .tl-key{fill:var(--orange)}
+svg .box{fill:#fff;stroke:#1C4767;stroke-width:1.3}
+svg .box-a{fill:#E5ECF4;stroke:#116AAB;stroke-width:1.6}
+svg .bt{font-size:13px;font-weight:700;fill:var(--caption)}
+svg .bs{font-size:11px;fill:#545454}
+svg .ar{stroke:#767676;stroke-width:1.3;fill:none}
+/* cards */
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:16px;margin-top:18px}
+.card{background:#fff;border-top:3px solid var(--primary);padding:16px 18px;box-shadow:-3px 3px 6px -2px rgba(28,71,103,.18)}
+.card .k{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gray-medium)}
+.card h3{margin:4px 0 6px;font-size:16px}
+.card p{font-size:14.5px}
+.check{list-style:none;margin-left:0}
+.check li{padding-left:28px;position:relative}
+.check li::before{content:"";position:absolute;left:0;top:4px;width:16px;height:16px;border:2px solid var(--primary);border-radius:3px}
+.tabs{display:flex;gap:8px;margin-top:20px;flex-wrap:wrap}
+.tab{font-family:var(--font);font-size:14px;font-weight:700;color:var(--primary);background:#fff;border:1.5px solid var(--primary);border-radius:4px;padding:8px 18px;cursor:pointer}
+.tab[aria-selected="true"]{background:var(--primary);color:#fff}
+.tab:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;margin-top:18px}
+.kpi{background:#fff;border-top:4px solid var(--primary);padding:20px 20px 18px;box-shadow:-3px 3px 6px -2px rgba(28,71,103,.18)}
+.kpi.main{border-top-color:var(--orange)}
+.kpi .k{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gray-medium)}
+.kpi .v{font-size:clamp(28px,3.4vw,36px);font-weight:800;color:var(--caption);line-height:1.15;margin-top:8px;font-variant-numeric:tabular-nums}
+.kpi .v small{font-size:15px;font-weight:700;color:var(--gray-medium);margin-right:4px}
+.kpi .d{font-size:13px;color:var(--gray-dark);margin-top:6px}
+footer{padding:28px 24px;font-size:13px;color:var(--gray-medium)}
+@media (max-width:600px){main section{padding:44px 18px}.hero{padding:48px 18px 44px}.topbar .v{display:none}figure{padding:14px 12px 10px}}
+@media print{.topbar,.drawer,.scrim{display:none}.hero{margin-top:0}}
+</style><style>
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:16px;margin-top:18px}
+.kpi{background:#fff;border-top:4px solid var(--primary);padding:20px 20px 18px;box-shadow:-3px 3px 6px -2px rgba(28,71,103,.18)}
+.kpi.main{border-top-color:var(--orange)}
+.kpi .k{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--gray-medium)}
+.kpi .v{font-size:clamp(28px,3.4vw,36px);font-weight:800;color:var(--caption);line-height:1.15;margin-top:8px}
+.kpi .v small{font-size:15px;font-weight:700;color:var(--gray-medium);margin-right:4px}
+.kpi .d{font-size:13px;color:var(--gray-dark);margin-top:6px}
+.formula{background:var(--caption);color:#fff;padding:16px 20px;margin:16px 0;font-size:16px;font-weight:600;text-align:center}
+.formula span{color:#FFC48F}
+</style>
+</head>
+<body>
+<header class="topbar">
+  <button class="burger" id="burger" aria-label="Abrir índice de secciones" aria-expanded="false" aria-controls="drawer"><span></span><span></span><span></span></button>
+  <div class="t">Dimensionamiento del piloto</div>
+  <div class="v">Versión piloto 1 · 31 de octubre de 2026</div>
+</header>
+<nav class="drawer" id="drawer" aria-label="Índice de secciones">
+  <div class="eyebrow">Índice</div>
+  <a href="#cifras"><span class="n">01</span>Cifras clave</a>
+  <a href="#resumen"><span class="n">02</span>Resumen ejecutivo</a>
+  <a href="#alcance"><span class="n">03</span>Alcance</a>
+  <a href="#supuestos"><span class="n">04</span>Supuestos</a>
+  <a href="#enfoque"><span class="n">05</span>Enfoque técnico</a>
+  <a href="#recursos"><span class="n">06</span>Recursos</a>
+  <a href="#cronograma"><span class="n">07</span>Cronograma e hitos</a>
+  <a href="#presupuesto"><span class="n">08</span>Presupuesto</a>
+  <a href="#riesgos"><span class="n">09</span>Riesgos y dependencias</a>
+</nav>
+<div class="scrim" id="scrim"></div>
+
+<div class="hero"><div class="wrap">
+  <div class="eyebrow">Piloto · Crédito cafetalero</div>
+  <h1>Dimensionamiento del piloto — Puntaje determinístico para crédito cafetalero</h1>
+  <p>Los mismos tres casos de uso, resueltos con un puntaje por pesos que el banco configura, entregado llave en mano en 4 meses para 1.000 caficultores de Loja y Zamora Chinchipe.</p>
+  <div class="stats">
+    <div class="stat"><div class="n">16 semanas</div><div class="l">del inicio a la entrega llave en mano</div></div>
+    <div class="stat"><div class="n">USD 66.727</div><div class="l">costo total del piloto</div></div>
+    <div class="stat"><div class="n">3 roles</div><div class="l">consulta, configuración y administrador</div></div>
+    <div class="stat"><div class="n">0 reentrenamientos</div><div class="l">el puntaje se ajusta desde la consola</div></div>
+  </div>
+</div></div>
+
+<main>
+<section id="cifras"><div class="wrap">
+  <div class="eyebrow">01</div>
+  <h2>Cifras clave</h2>
+  <p class="lead">Costo empresa en USD, con la reserva del 6% incluida.</p>
+  <div class="kpis">
+    <div class="kpi main"><div class="k">Costo total del piloto</div><div class="v"><small>USD</small>66.727</div><div class="d">Llave en mano: construcción, pruebas, despliegue, documentación, capacitación y código</div></div>
+    <div class="kpi"><div class="k">Duración</div><div class="v">4 meses</div><div class="d">16 semanas desde el inicio hasta la entrega</div></div>
+    <div class="kpi"><div class="k">Costo mensual promedio</div><div class="v"><small>USD</small>16.682</div><div class="d">Total ÷ 4 meses</div></div>
+    <div class="kpi"><div class="k">Operación anual para el banco</div><div class="v"><small>USD</small>8.837</div><div class="d">Referencia: nube, IA y mensajería después de la entrega; no incluido</div></div>
+  </div>
+  <p class="note">El piloto no incluye plan de soporte ni operación posterior a la entrega.</p>
+</div></section>
+
+<section id="resumen"><div class="wrap">
+  <div class="eyebrow">02</div>
+  <h2>Resumen ejecutivo</h2>
+  <p class="lead">El piloto resuelve los mismos tres casos de uso con un método más simple: un puntaje determinístico por pesos que el banco configura, en lugar de modelos de machine learning.</p>
+  <div class="cards">
+    <div class="card"><div class="k">1 · Aprobación</div><h3>Puntaje de aprobación</h3><p>Cada solicitud recibe un puntaje que se compara con un mínimo de aprobación.</p></div>
+    <div class="card"><div class="k">2 · Seguimiento</div><h3>Puntaje de seguimiento</h3><p>Cada crédito activo recibe un puntaje; por debajo de su umbral, se marca para visita de verificación.</p></div>
+    <div class="card"><div class="k">3 · Recomendaciones</div><h3>Mensajes con IA</h3><p>Cultivo, cosecha y poscosecha generados desde literatura pública, con pocos parámetros específicos.</p></div>
+  </div>
+  <p style="margin-top:16px">Los criterios, los tipos de evidencia, los umbrales y los pesos se definen en una consola web, sin programar. Se entrega llave en mano en 16 semanas, con el código, la documentación y la capacitación, sin plan de soporte posterior.</p>
+</div></section>
+
+<section id="alcance"><div class="wrap">
+  <div class="eyebrow">03</div>
+  <h2>Alcance</h2>
+  <p class="lead">El piloto entrega una plataforma web para 1.000 caficultores de Loja y Zamora Chinchipe, con los mismos casos de uso del proyecto completo y un método determinístico.</p>
+  <div class="tbl"><table>
+    <tr><th>Caso de uso</th><th>Qué hace</th><th>Resultado</th></tr>
+    <tr><td><b>1 · Puntaje de aprobación</b></td><td>Suma ponderada de los criterios de la solicitud</td><td>Aprueba o no frente al mínimo configurado</td></tr>
+    <tr><td><b>2 · Puntaje de seguimiento</b></td><td>Suma ponderada de los criterios de uso del crédito</td><td>Requiere visita o no frente a su umbral</td></tr>
+    <tr><td><b>3 · Recomendaciones</b></td><td>Mensajes genéricos generados con IA desde literatura pública</td><td>Cultivo, cosecha y poscosecha según zona, altitud y fase</td></tr>
+  </table></div>
+  <h3>Incluye</h3>
+  <ul>
+    <li>Consola web para definir criterios, tipos de evidencia, umbrales, pesos y mínimos, sin programar.</li>
+    <li>Tres tipos de evidencia: geolocalización, valor de formulario y documento de soporte con valor de entrada manual.</li>
+    <li>Captura de evidencia desde el navegador, por el analista del banco o por el caficultor. La ubicación se toma con el GPS del celular o se dibuja sobre un mapa.</li>
+    <li>Tres roles de usuario: consulta, configuración y administrador.</li>
+    <li>Importación de solicitudes desde archivo y una API sencilla de entrada.</li>
+    <li>Generación de recomendaciones con IA, con revisión antes del envío por WhatsApp o SMS.</li>
+    <li>Pruebas de aceptación con el banco, despliegue en la cuenta de AWS del banco, documentación técnica y de usuario, capacitación y entrega del código fuente.</li>
+  </ul>
+  <h3>No incluye</h3>
+  <ul>
+    <li>Machine learning, reentrenamientos, detección automática de anomalías ni puntajes que aprendan de los resultados.</li>
+    <li>Imágenes satelitales.</li>
+    <li>App móvil nativa; la captura se hace desde el navegador.</li>
+    <li>Recomendaciones personalizadas por caficultor.</li>
+    <li>Plan de soporte, operación o mantenimiento después de la entrega.</li>
+    <li>Integración con el sistema central del banco más allá de la API de entrada.</li>
+    <li>Costos de nube, IA y mensajería después de la entrega.</li>
+  </ul>
+</div></section>
+
+<section id="supuestos"><div class="wrap">
+  <div class="eyebrow">04</div>
+  <h2>Supuestos</h2>
+  <ul>
+    <li><b>Moneda y costo.</b> USD, costo empresa del equipo en Colombia (salario más cargas de ley, factor de 52,2%) a 3.200 COP por USD. No incluye margen ni impuestos de la venta.</li>
+    <li><b>Duración.</b> 16 semanas desde el inicio hasta la entrega llave en mano.</li>
+    <li><b>Criterios y pesos.</b> El banco define y aprueba los criterios, umbrales y pesos iniciales en las primeras 3 semanas, con apoyo del equipo y del agrónomo.</li>
+    <li><b>Datos.</b> Las solicitudes llegan por archivo o por la API de entrada. No se requieren datos históricos para entrenar.</li>
+    <li><b>Nube.</b> Se despliega en la cuenta de AWS del banco, que asume sus costos desde la entrega.</li>
+    <li><b>Recomendaciones.</b> Mensajes genéricos por zona, banda de altitud, fase del cultivo y tipo de crédito; los aprueba un usuario de configuración antes de enviarlos.</li>
+    <li><b>Sin soporte.</b> El piloto termina con la entrega del código, la documentación y la capacitación.</li>
+    <li><b>Reserva para imprevistos.</b> 6% sobre el subtotal.</li>
+  </ul>
+</div></section>
+
+<section id="enfoque"><div class="wrap">
+  <div class="eyebrow">05</div>
+  <h2>Enfoque técnico</h2>
+  <p class="lead">Cada puntaje es una suma ponderada de criterios que el banco configura: el mismo dato siempre produce el mismo resultado, y cada punto se puede explicar.</p>
+  <h3>Cómo se calcula el puntaje</h3>
+  <p>Cada criterio entrega un valor entre 0 y 1 (por ejemplo, 1 si supera su umbral y 0 si no), que se multiplica por su peso. Los pesos de cada puntaje siempre suman 1: la consola no deja guardar una configuración que no sume 100%. Así, el puntaje es la suma de esos productos y queda entre 0 y 100%.</p>
+  <div class="formula">Puntaje = Σ (valor del criterio × peso), con Σ pesos = 1 &nbsp;→&nbsp; <span>aprueba / requiere visita</span> según el mínimo</div>
+  <div class="tbl"><table>
+    <tr><th>Criterio de aprobación (ejemplo)</th><th>Tipo de evidencia</th><th>Regla</th><th class="num">Peso</th></tr>
+    <tr><td>Altitud de la finca en rango viable</td><td>Geolocalización</td><td>1 si está entre 1.600 y 2.100 msnm</td><td class="num">0,15</td></tr>
+    <tr><td>Ventas del año anterior</td><td>Valor de formulario</td><td>1 si superan el umbral</td><td class="num">0,25</td></tr>
+    <tr><td>Referencia de la cooperativa o asociación</td><td>Documento de soporte</td><td>Valor que ingresa el evaluador</td><td class="num">0,40</td></tr>
+    <tr><td>Facturas de abonos del año anterior</td><td>Documento de soporte</td><td>Valor que ingresa el evaluador</td><td class="num">0,20</td></tr>
+    <tr class="sub"><td>Total</td><td></td><td></td><td class="num">1,00</td></tr>
+  </table></div>
+  <p class="note">Los criterios y pesos del ejemplo son ilustrativos; los definitivos los aprueba el equipo de riesgo del banco en H1.</p>
+  <h3>Tipos de evidencia</h3>
+  <div class="cards">
+    <div class="card"><div class="k">Geolocalización</div><p>Un punto o polígono de la finca, tomado con el GPS del celular o, lo más común, dibujado sobre un mapa en la web. La altitud se calcula con un modelo de elevación público.</p></div>
+    <div class="card"><div class="k">Valor de formulario</div><p>Un número, una opción o un sí/no que se compara con el umbral del criterio.</p></div>
+    <div class="card"><div class="k">Documento de soporte</div><p>Se adjunta como respaldo; el evaluador ingresa a mano el valor que cuenta para el puntaje.</p></div>
+  </div>
+  <p style="margin-top:14px">La captura la puede hacer el analista del banco o el propio caficultor, en ambos casos desde el navegador.</p>
+  <h3>Roles de usuario</h3>
+  <div class="tbl"><table>
+    <tr><th>Rol</th><th>Qué puede hacer</th></tr>
+    <tr><td><b>Consulta</b></td><td>Ver solicitudes, créditos, evidencias, puntajes y su desglose</td></tr>
+    <tr><td><b>Configuración</b></td><td>Definir criterios, tipos de evidencia, umbrales, pesos y mínimos; aprobar recomendaciones</td></tr>
+    <tr><td><b>Administrador</b></td><td>Gestionar usuarios y roles, parámetros generales y registro de cambios</td></tr>
+  </table></div>
+  <h3>Recomendaciones con IA</h3>
+  <p>Un modelo de lenguaje genera los mensajes a partir de una biblioteca de literatura pública sobre café, revisada por un agrónomo. Los parámetros son pocos: zona, banda de altitud, fase del cultivo y tipo de crédito. Un usuario de configuración aprueba cada mensaje antes de enviarlo por WhatsApp o SMS.</p>
+  <figure>
+    <div class="ft">Una consola web, una base de datos y un servicio de IA, todo en la cuenta de AWS del banco</div>
+    <div class="fs">Arquitectura de referencia del piloto</div>
+    <svg viewBox="0 0 740 300" role="img" aria-label="Arquitectura de referencia del piloto">
+      <defs><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse"><path d="M0 0L10 5L0 10z" fill="#767676"/></marker></defs>
+      <text x="16" y="22" class="tick">ENTRADAS</text><text x="276" y="22" class="tick">AWS DEL BANCO</text><text x="566" y="22" class="tick">SALIDAS</text>
+      <rect x="16" y="36" width="190" height="52" rx="6" class="box"/><text x="30" y="58" class="bt">Solicitudes del banco</text><text x="30" y="76" class="bs">Archivo o API de entrada</text>
+      <rect x="16" y="104" width="190" height="52" rx="6" class="box"/><text x="30" y="126" class="bt">Captura en el navegador</text><text x="30" y="144" class="bs">Analista o caficultor</text>
+      <rect x="16" y="172" width="190" height="52" rx="6" class="box"/><text x="30" y="194" class="bt">Consola de configuración</text><text x="30" y="212" class="bs">Criterios, umbrales y pesos</text>
+      <rect x="16" y="240" width="190" height="52" rx="6" class="box"/><text x="30" y="262" class="bt">Literatura pública</text><text x="30" y="280" class="bs">Curada por el agrónomo</text>
+      <rect x="262" y="36" width="230" height="52" rx="6" class="box-a"/><text x="276" y="58" class="bt">Aplicación web</text><text x="276" y="76" class="bs">Roles: consulta, configuración, admin</text>
+      <rect x="262" y="138" width="230" height="52" rx="6" class="box-a"/><text x="276" y="160" class="bt">Motor de puntaje por pesos</text><text x="276" y="178" class="bs">PostgreSQL + PostGIS · S3</text>
+      <rect x="262" y="240" width="230" height="52" rx="6" class="box-a"/><text x="276" y="262" class="bt">Amazon Bedrock</text><text x="276" y="280" class="bs">Genera las recomendaciones</text>
+      <rect x="552" y="88" width="172" height="52" rx="6" class="box"/><text x="566" y="110" class="bt">Puntajes</text><text x="566" y="128" class="bs">Aprobación y visita</text>
+      <rect x="552" y="240" width="172" height="52" rx="6" class="box"/><text x="566" y="262" class="bt">WhatsApp y SMS</text><text x="566" y="280" class="bs">Tras aprobar el mensaje</text>
+      <path d="M206 62H260" class="ar" marker-end="url(#ar)"/><path d="M206 130H234V70H260" class="ar" marker-end="url(#ar)"/><path d="M206 198H234V164H260" class="ar" marker-end="url(#ar)"/><path d="M206 266H260" class="ar" marker-end="url(#ar)"/>
+      <path d="M377 88V136" class="ar" marker-end="url(#ar)"/><path d="M492 164H522V114H550" class="ar" marker-end="url(#ar)"/><path d="M492 266H550" class="ar" marker-end="url(#ar)"/>
+    </svg>
+  </figure>
+</div></section>
+
+<section id="recursos"><div class="wrap">
+  <div class="eyebrow">06</div>
+  <h2>Recursos</h2>
+  <p class="lead">El piloto necesita 6 roles a tiempo parcial o completo durante 4 meses, más un agrónomo consultor. No hay equipo de operación porque no hay soporte posterior.</p>
+  <div class="tbl"><table>
+    <tr><th>Rol</th><th class="num">Costo empresa mensual (USD)</th><th class="num">M1</th><th class="num">M2</th><th class="num">M3</th><th class="num">M4</th><th class="num">Meses-persona</th></tr>
+    <tr><td>Líder de entrega</td><td class="num">6.700</td><td class="num">50%</td><td class="num">50%</td><td class="num">50%</td><td class="num">50%</td><td class="num">2,0</td></tr>
+    <tr><td>Ingeniero de datos</td><td class="num">5.700</td><td class="num">50%</td><td class="num">50%</td><td class="num">50%</td><td class="num">—</td><td class="num">1,5</td></tr>
+    <tr><td>Desarrollador backend (con integración de IA)</td><td class="num">5.000</td><td class="num">60%</td><td class="num">100%</td><td class="num">100%</td><td class="num">30%</td><td class="num">2,9</td></tr>
+    <tr><td>Desarrollador frontend web</td><td class="num">4.600</td><td class="num">50%</td><td class="num">100%</td><td class="num">100%</td><td class="num">50%</td><td class="num">3,0</td></tr>
+    <tr><td>QA</td><td class="num">3.500</td><td class="num">—</td><td class="num">—</td><td class="num">50%</td><td class="num">50%</td><td class="num">1,0</td></tr>
+    <tr><td>DevOps (AWS)</td><td class="num">5.700</td><td class="num">25%</td><td class="num">25%</td><td class="num">25%</td><td class="num">25%</td><td class="num">1,0</td></tr>
+    <tr><td>Agrónomo de café (consultor)</td><td class="num">20 por hora</td><td class="num">30 h</td><td class="num">—</td><td class="num">30 h</td><td class="num">—</td><td class="num">60 h</td></tr>
+  </table></div>
+  <p class="note">Las tarifas son las mismas del proyecto completo: costo empresa con factor de 52,2% a 3.200 COP por USD, redondeado a 100 USD por debajo. El desarrollador backend asume también las recomendaciones con IA (biblioteca de literatura, instrucciones del modelo y pruebas con el agrónomo), por eso su salario sube 7% (USD 3.333 de salario, USD 5.000 de costo empresa). El desarrollador frontend toma la tarifa del desarrollador móvil, porque la captura se hace en la web. No participan el científico de datos ni el especialista en teledetección.</p>
+</div></section>
+
+<section id="cronograma"><div class="wrap">
+  <div class="eyebrow">07</div>
+  <h2>Cronograma e hitos</h2>
+  <p class="lead">El motor de puntaje y la consola de configuración están listos en la semana 8; las semanas 12 a 16 son de pruebas con el banco, despliegue, capacitación y entrega.</p>
+  <figure>
+    <div class="ft">El piloto se entrega llave en mano en la semana 16</div>
+    <div class="fs">Semanas desde el inicio del proyecto</div>
+    <svg viewBox="0 0 740 398" role="img" aria-label="Cronograma del piloto, 16 semanas"><line x1="260.0" x2="260.0" y1="46" y2="390" class="grid"/><text x="260.0" y="36" text-anchor="middle" class="tick">Sem 0</text><line x1="310.0" x2="310.0" y1="46" y2="390" class="grid"/><text x="310.0" y="36" text-anchor="middle" class="tick">Sem 2</text><line x1="360.0" x2="360.0" y1="46" y2="390" class="grid"/><text x="360.0" y="36" text-anchor="middle" class="tick">Sem 4</text><line x1="410.0" x2="410.0" y1="46" y2="390" class="grid"/><text x="410.0" y="36" text-anchor="middle" class="tick">Sem 6</text><line x1="460.0" x2="460.0" y1="46" y2="390" class="grid"/><text x="460.0" y="36" text-anchor="middle" class="tick">Sem 8</text><line x1="510.0" x2="510.0" y1="46" y2="390" class="grid"/><text x="510.0" y="36" text-anchor="middle" class="tick">Sem 10</text><line x1="560.0" x2="560.0" y1="46" y2="390" class="grid"/><text x="560.0" y="36" text-anchor="middle" class="tick">Sem 12</text><line x1="610.0" x2="610.0" y1="46" y2="390" class="grid"/><text x="610.0" y="36" text-anchor="middle" class="tick">Sem 14</text><line x1="660.0" x2="660.0" y1="46" y2="390" class="grid"/><text x="660.0" y="36" text-anchor="middle" class="tick">Sem 16</text><text x="16" y="64" class="lbl-n">Descubrimiento y criterios</text><rect x="260.0" y="54" width="75.0" height="12" rx="6" class="tl-bar"/><text x="345.0" y="64" class="tick">sem 0–3</text><text x="16" y="90" class="lbl-n">Diseño y arquitectura</text><rect x="285.0" y="80" width="75.0" height="12" rx="6" class="tl-bar"/><text x="370.0" y="90" class="tick">sem 1–4</text><text x="16" y="116" class="lbl-n">H1 · Criterios y pesos aprobados</text><path d="M335.0 105l7 7l-7 7l-7 -7z" class="tl-ms"/><text x="347.0" y="116" class="tick">sem 3</text><text x="16" y="142" class="lbl-n">H2 · Diseño aprobado</text><path d="M360.0 131l7 7l-7 7l-7 -7z" class="tl-ms"/><text x="372.0" y="142" class="tick">sem 4</text><text x="16" y="168" class="lbl-n">Motor de puntaje y configuración</text><rect x="360.0" y="158" width="100.0" height="12" rx="6" class="tl-bar"/><text x="470.0" y="168" class="tick">sem 4–8</text><text x="16" y="194" class="lbl-n">Recomendaciones con IA</text><rect x="310.0" y="184" width="250.0" height="12" rx="6" class="tl-bar"/><text x="570.0" y="194" class="tick">sem 2–12</text><text x="16" y="220" class="lbl-n">Captura, consulta y roles</text><rect x="410.0" y="210" width="150.0" height="12" rx="6" class="tl-bar"/><text x="570.0" y="220" class="tick">sem 6–12</text><text x="16" y="246" class="lbl-n">H3 · Motor y consola listos</text><path d="M460.0 235l7 7l-7 7l-7 -7z" class="tl-ms"/><text x="472.0" y="246" class="tick">sem 8</text><text x="16" y="272" class="lbl-n">H4 · Funcionalidad completa</text><path d="M560.0 261l7 7l-7 7l-7 -7z" class="tl-ms"/><text x="572.0" y="272" class="tick">sem 12</text><text x="16" y="298" class="lbl-n">Pruebas con el banco</text><rect x="560.0" y="288" width="50.0" height="12" rx="6" class="tl-bar"/><text x="620.0" y="298" class="tick">sem 12–14</text><text x="16" y="324" class="lbl-n">H5 · Pruebas aceptadas</text><path d="M610.0 313l7 7l-7 7l-7 -7z" class="tl-ms"/><text x="622.0" y="324" class="tick">sem 14</text><text x="16" y="350" class="lbl-n">Despliegue y capacitación</text><rect x="610.0" y="340" width="50.0" height="12" rx="6" class="tl-bar"/><text x="670.0" y="350" class="tick">sem 14–16</text><text x="16" y="376" class="lbl-n" style="font-weight:700">H6 · Entrega llave en mano</text><path d="M660.0 365l7 7l-7 7l-7 -7z" class="tl-key"/><text x="672.0" y="376" class="tick" style="font-weight:700">sem 16</text></svg>
+  </figure>
+  <p>La fecha de H1 depende de que el banco apruebe los criterios y pesos iniciales: si se retrasa, se corre todo lo demás. Los pesos se pueden ajustar después desde la consola sin cambiar el código.</p>
+</div></section>
+
+<section id="presupuesto"><div class="wrap">
+  <div class="eyebrow">08</div>
+  <h2>Presupuesto</h2>
+  <p class="lead">El piloto cuesta USD 66.727 con la reserva del 6% incluida; el 96% del subtotal es el costo del equipo. Las cifras son costo empresa, sin margen ni impuestos de la venta.</p>
+  <figure>
+    <div class="ft">El gasto crece hasta M3, cuando coinciden la construcción, las pruebas y las recomendaciones</div>
+    <div class="fs">Costo por mes, USD con reserva del 6%</div>
+    <svg viewBox="0 0 740 280" role="img" aria-label="Costo por mes"><rect x="120" y="132.9" width="70" height="97.1" class="c-op"/><rect x="120" y="127.1" width="70" height="5.8" class="c-res"/><text x="155" y="119.1" text-anchor="middle" class="lbl">14.867</text><text x="155" y="250" text-anchor="middle" class="tick">M1</text><rect x="260" y="106.6" width="70" height="123.4" class="c-op"/><rect x="260" y="99.2" width="70" height="7.4" class="c-res"/><text x="295" y="91.2" text-anchor="middle" class="lbl">18.895</text><text x="295" y="250" text-anchor="middle" class="tick">M2</text><rect x="400" y="90.3" width="70" height="139.7" class="c-op"/><rect x="400" y="81.9" width="70" height="8.4" class="c-res"/><text x="435" y="73.9" text-anchor="middle" class="lbl">21.385</text><text x="435" y="250" text-anchor="middle" class="tick">M3</text><rect x="540" y="154.4" width="70" height="75.6" class="c-op"/><rect x="540" y="149.8" width="70" height="4.5" class="c-res"/><text x="575" y="141.8" text-anchor="middle" class="lbl">11.580</text><text x="575" y="250" text-anchor="middle" class="tick">M4</text><line x1="100" x2="660" y1="230" y2="230" class="axis"/><g transform="translate(120,262)"><rect width="12" height="12" class="c-op"/><text x="18" y="10" class="tick">Equipo e infraestructura</text><rect x="200" width="12" height="12" class="c-res"/><text x="218" y="10" class="tick">Reserva 6%</text></g></svg>
+  </figure>
+  <div class="tbl"><table>
+    <tr><th>Actividad (USD)</th><th class="num">M1</th><th class="num">M2</th><th class="num">M3</th><th class="num">M4</th><th class="num">Total</th></tr>
+    <tr><td>Descubrimiento, criterios y diseño</td><td class="num">7.250</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">7.250</td></tr>
+    <tr><td>Motor de puntaje y consola de configuración</td><td class="num">—</td><td class="num">7.850</td><td class="num">5.350</td><td class="num">—</td><td class="num">13.200</td></tr>
+    <tr><td>Captura de evidencia, consulta y roles</td><td class="num">—</td><td class="num">4.600</td><td class="num">4.600</td><td class="num">2.300</td><td class="num">11.500</td></tr>
+    <tr><td>Integración, documentación y entrega del código</td><td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">1.500</td><td class="num">1.500</td></tr>
+    <tr><td>Recomendaciones con IA (incluye agrónomo)</td><td class="num">1.500</td><td class="num">—</td><td class="num">3.100</td><td class="num">—</td><td class="num">4.600</td></tr>
+    <tr><td>Pruebas (QA y aceptación con el banco)</td><td class="num">—</td><td class="num">—</td><td class="num">1.750</td><td class="num">1.750</td><td class="num">3.500</td></tr>
+    <tr><td>Infraestructura (DevOps, AWS y servicio de IA en desarrollo)</td><td class="num">1.925</td><td class="num">2.025</td><td class="num">2.025</td><td class="num">2.025</td><td class="num">8.000</td></tr>
+    <tr><td>Gestión del proyecto</td><td class="num">3.350</td><td class="num">3.350</td><td class="num">3.350</td><td class="num">3.350</td><td class="num">13.400</td></tr>
+    <tr class="sub"><td>Subtotal</td><td class="num">14.025</td><td class="num">17.825</td><td class="num">20.175</td><td class="num">10.925</td><td class="num">62.950</td></tr>
+    <tr><td>Reserva para imprevistos (6%)</td><td class="num">842</td><td class="num">1.069</td><td class="num">1.211</td><td class="num">655</td><td class="num">3.777</td></tr>
+    <tr class="total"><td>Total</td><td class="num">14.867</td><td class="num">18.895</td><td class="num">21.385</td><td class="num">11.580</td><td class="num">66.727</td></tr>
+  </table></div>
+  <figure>
+    <div class="ft">La gestión, la captura y el motor de puntaje suman más de la mitad del subtotal</div>
+    <div class="fs">Costo por actividad, USD sin reserva</div>
+    <svg viewBox="0 0 740 302" role="img" aria-label="Costo por actividad"><text x="248" y="36" text-anchor="end" class="lbl-n">Gestión del proyecto</text><rect x="260" y="20" width="363.7" height="22" class="c-op"/><text x="631.7" y="36" class="lbl">13.400</text><text x="248" y="70" text-anchor="end" class="lbl-n">Motor de puntaje y configuración</text><rect x="260" y="54" width="358.3" height="22" class="c-op"/><text x="626.3" y="70" class="lbl">13.200</text><text x="248" y="104" text-anchor="end" class="lbl-n">Captura, consulta y roles</text><rect x="260" y="88" width="312.1" height="22" class="c-op"/><text x="580.1" y="104" class="lbl">11.500</text><text x="248" y="138" text-anchor="end" class="lbl-n">Infraestructura</text><rect x="260" y="122" width="217.1" height="22" class="c-op"/><text x="485.1" y="138" class="lbl">8.000</text><text x="248" y="172" text-anchor="end" class="lbl-n">Descubrimiento, criterios y diseño</text><rect x="260" y="156" width="196.8" height="22" class="c-op"/><text x="464.8" y="172" class="lbl">7.250</text><text x="248" y="206" text-anchor="end" class="lbl-n">Recomendaciones con IA</text><rect x="260" y="190" width="124.9" height="22" class="c-op"/><text x="392.9" y="206" class="lbl">4.600</text><text x="248" y="240" text-anchor="end" class="lbl-n">Pruebas y aceptación</text><rect x="260" y="224" width="95.0" height="22" class="c-op"/><text x="363.0" y="240" class="lbl">3.500</text><text x="248" y="274" text-anchor="end" class="lbl-n">Integración y entrega del código</text><rect x="260" y="258" width="40.7" height="22" class="c-op"/><text x="308.7" y="274" class="lbl">1.500</text></svg>
+  </figure>
+  <h3>Cómo se calcularon las líneas que no son personal</h3>
+  <ul>
+    <li><b>AWS en desarrollo.</b> USD 500 al mes durante los 4 meses (ambientes de desarrollo y pruebas).</li>
+    <li><b>Servicio de IA en desarrollo.</b> USD 100 al mes de M2 a M4 para generar y probar recomendaciones.</li>
+    <li><b>Reserva para imprevistos.</b> 6% sobre el subtotal. Cubre ajustes a los criterios después de H1 y datos del banco más sucios de lo previsto.</li>
+  </ul>
+  <h3>Costo operativo de referencia para el banco</h3>
+  <p>Después de la entrega; no está incluido en el total del piloto.</p>
+  <div class="tbl"><table>
+    <tr><th>Concepto</th><th class="num">USD al año</th></tr>
+    <tr><td>AWS (aplicación, base de datos y almacenamiento), unos USD 400 al mes</td><td class="num">4.800</td></tr>
+    <tr><td>Servicio de IA para recomendaciones, unos USD 50 al mes</td><td class="num">600</td></tr>
+    <tr><td>Mensajería: 2 mensajes al mes a 1.000 caficultores, 80% WhatsApp y 20% SMS</td><td class="num">3.437</td></tr>
+    <tr class="total"><td>Total anual</td><td class="num">8.837</td></tr>
+  </table></div>
+  <p class="note">Algunas sumas pueden diferir en 1 USD por redondeo.</p>
+</div></section>
+
+<section id="riesgos"><div class="wrap">
+  <div class="eyebrow">09</div>
+  <h2>Riesgos y dependencias</h2>
+  <p class="lead">El mayor riesgo del piloto es que los pesos no reflejen bien el riesgo real: el puntaje no aprende solo, así que depende de que el banco los revise con los resultados.</p>
+  <div class="tbl"><table>
+    <tr><th>Riesgo</th><th>Efecto</th><th>Mitigación</th></tr>
+    <tr><td>Pesos y umbrales mal calibrados</td><td>Se aprueban solicitudes riesgosas o se rechazan buenas</td><td>Revisión con el equipo de riesgo en H1 y ajuste desde la consola sin cambiar código</td></tr>
+    <tr><td>Aprobación de criterios tardía</td><td>Se corre todo el cronograma</td><td>Sesiones de definición en las semanas 1 a 3 con fecha fija para H1</td></tr>
+    <tr><td>Errores en valores de entrada manual</td><td>Puntajes incorrectos en documentos de soporte</td><td>Validaciones de rango en el formulario y registro de quién ingresó cada valor</td></tr>
+    <tr><td>Recomendaciones genéricas poco relevantes</td><td>Baja lectura por parte de los caficultores</td><td>Biblioteca curada por agrónomo y aprobación de cada mensaje antes de enviarlo</td></tr>
+    <tr><td>Sin soporte después de la entrega</td><td>El banco depende de su propio equipo para ajustes y fallas</td><td>Documentación técnica completa, capacitación y transferencia del código</td></tr>
+    <tr><td>Conectividad rural</td><td>Evidencia que se carga tarde</td><td>Captura desde el navegador con reintento de envío</td></tr>
+  </table></div>
+  <h3>Lo que aporta el banco</h3>
+  <ul class="check">
+    <li>Criterios, umbrales, pesos y mínimos iniciales, aprobados por su equipo de riesgo</li>
+    <li>Archivo de solicitudes o adaptación de su formulario a la API de entrada</li>
+    <li>Cuenta de AWS para el despliegue y sus costos desde la entrega</li>
+    <li>Número de WhatsApp Business verificado a nombre del banco</li>
+    <li>Usuarios para las pruebas de aceptación y la capacitación</li>
+    <li>Equipo técnico que reciba el código y la operación</li>
+  </ul>
+</div></section>
+</main>
+<footer><div class="wrap">Dimensionamiento del piloto · Versión piloto 1 · 31 de octubre de 2026 · Valores en USD, costo empresa sin margen ni impuestos.</div></footer>
+
+<script>
+(function(){
+  var body=document.body, btn=document.getElementById('burger'), scrim=document.getElementById('scrim');
+  function setOpen(o){body.classList.toggle('nav-open',o);btn.setAttribute('aria-expanded',o?'true':'false');btn.setAttribute('aria-label',o?'Cerrar índice de secciones':'Abrir índice de secciones');}
+  btn.addEventListener('click',function(){setOpen(!body.classList.contains('nav-open'));});
+  scrim.addEventListener('click',function(){setOpen(false);});
+  document.addEventListener('keydown',function(e){if(e.key==='Escape')setOpen(false);});
+  var links=[].slice.call(document.querySelectorAll('.drawer a'));
+  links.forEach(function(a){a.addEventListener('click',function(){setOpen(false);});});
+  var secs=links.map(function(a){return document.querySelector(a.getAttribute('href'));});
+  function spy(){var y=window.scrollY+100,cur=0;secs.forEach(function(s,i){if(s&&s.offsetTop<=y)cur=i;});links.forEach(function(a,i){a.classList.toggle('active',i===cur);});}
+  window.addEventListener('scroll',spy,{passive:true});spy();
+})();
+</script>
+</body>
+</html>
