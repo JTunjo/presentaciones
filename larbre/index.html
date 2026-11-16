@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Diagnóstico de fermentación y secado · Tunjo Smart Solutions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+<script>
+/* =========================================================
+   CONFIGURACIÓN — edite aquí sin tocar la lógica de abajo.
+   ========================================================= */
+const ASSETS = {
+  logoPropio:  "https://raw.githubusercontent.com/JTunjo/asset_hosting/refs/heads/main/Tunjo_h.png",     // Logo horizontal (barra superior)
+  logoBlanco:  "https://raw.githubusercontent.com/JTunjo/asset_hosting/refs/heads/main/TunjoWhite.png",  // Logo blanco (cierre oscuro)
+  portada:     "https://raw.githubusercontent.com/JTunjo/asset_hosting/refs/heads/main/portada.png"      // Foto horizontal de portada (≥ 1600×700)
+};
+
+const CONFIG = {
+  endpoint: "",                 // URL del Web App de Apps Script (termina en /exec)
+  token:    "cambia-este-token",// Debe coincidir con TOKEN en Code.gs
+  maxFotos: 6,
+  maxItemsChecklist: 7,
+  leadPorDefecto: "LAAC",
+  leads: {                      // Código que va en ?lead=CODIGO → nombre visible
+    LAAC: "L’Arbre à Café"
+  }
+};
+
+/* ---------------------------------------------------------
+   REGLAS DE LA CHECKLIST FINAL
+   Cada regla: { when: (a) => condición, text: "lo que se pide" }
+   a = respuestas. Helpers: has(a,"ruta","valor"), is(a,"ruta","valor")
+   --------------------------------------------------------- */
+// Fotos que el lead puede subir ya (y que se le recuerdan si no las subió)
+const PHOTO_RULES = [
+  { id: "globo",    when: (a) => true,
+    text: "El globo con la tapa o abertura visible. Si puedes, con una regla al lado." },
+  { id: "sensor",   when: (a) => is(a, "medicion.mide", "si"),
+    text: "La etiqueta del sensor y el equipo donde ves la lectura." },
+  { id: "secador",  when: (a) => has(a, "secado.metodo", "mecanica"),
+    text: "La placa del secador (marca, capacidad, fuente de calor)." },
+  { id: "area",     when: (a) => has(a, "secado.metodo", "patio") || has(a, "secado.metodo", "camas") || has(a, "secado.metodo", "marquesina"),
+    text: "El área de secado, completa." },
+  { id: "medidor",  when: (a) => is(a, "secado.humedad", "medidor"),
+    text: "El medidor de humedad que usan." }
+];
+
+// Lo que debe tener listo para después del acuerdo de confidencialidad
+const NDA_RULES = [
+  { when: (a) => true,
+    text: "El registro de un lote de ejemplo, desde la carga hasta el fin del secado, tal como lo tienes.",
+    detail: "Foto de la bitácora o el archivo original. No lo pases a limpio." },
+  { when: (a) => ["puntaje", "perfil", "ambos"].includes(get(a, "control.objetivo")),
+    text: "El puntaje o perfil de taza que buscan.",
+    detail: "Es la meta que le daríamos al control." },
+  { when: (a) => ["puntaje", "descriptores"].includes(get(a, "control.catacion")),
+    text: "El resultado de catación de ese mismo lote.",
+    detail: "Así conectamos proceso y taza desde el primer ejemplo." },
+  { when: (a) => (get(a, "fermentacion.sustratos") || []).some(v => v !== "ninguno"),
+    text: "La receta típica de sustratos.",
+    detail: "Qué agregan y en qué cantidad por kg de café." },
+  { when: (a) => ["insumos", "materiales", "ambos"].includes(get(a, "operacion.certificacion")),
+    text: "La lista de insumos y materiales permitidos por tu certificación.",
+    detail: "Define qué sondas y qué aditivos podemos proponer." },
+  { when: (a) => ["hoja", "software", "plataforma"].some(v => has(a, "datos.registros", v)),
+    text: "Cómo se exportan tus registros actuales.",
+    detail: "Formato, desde qué programa y quién tiene acceso." }
+];
+</script>
+
+<style>
+:root{
+  --primary:#116AAB; --primary-hover:#0E5A91; --primary-light:#E5ECF4;
+  --caption:#1C4767; --un-blue:#5792C9; --orange:#F58320; --peach:#FFC48F;
+  --gray-dark:#545454; --gray-medium:#767676; --gray-light:#F2F2F2;
+  --white-fao:#F7F8F9; --white:#FFFFFF; --line:#CFDDEB;
+  --font:"Open Sans","Helvetica Neue",Helvetica,Arial,sans-serif;
+  color-scheme:light;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:72px}
+body{background:var(--white);font-family:var(--font);color:var(--gray-dark);font-size:15px;line-height:1.55}
+img{max-width:100%}
+button,input,textarea,select{font-family:inherit;font-size:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- Encabezado institucional ---------- */
+.topbar{position:sticky;top:0;z-index:20;height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 48px;border-bottom:1px solid var(--gray-light);background:var(--white)}
+.logo{height:34px;width:auto;display:block}
+.logo-fallback{font-weight:800;color:var(--caption);font-size:18px}
+.section-name{font-size:13px;font-weight:600;color:var(--gray-medium);text-align:right}
+.section-name b{color:var(--primary);font-weight:700}
+
+/* ---------- Tipografía ---------- */
+.eyebrow{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--orange)}
+h1{font-size:34px;line-height:1.18;font-weight:700;color:var(--caption);margin-top:6px}
+h2{font-size:18px;line-height:1.25;font-weight:700;color:var(--primary)}
+h3{font-size:15px;line-height:1.3;font-weight:700;color:var(--caption)}
+.lede{font-size:16px;line-height:1.55;margin-top:10px;max-width:680px}
+.small{font-size:12.5px;line-height:1.5;color:var(--gray-medium)}
+
+/* ---------- Portada ---------- */
+.cover-hero{position:relative;min-height:420px;display:flex;align-items:flex-end;background:#3c6f96 center/cover no-repeat}
+.cover-overlay{position:absolute;inset:0;background:linear-gradient(90deg,rgba(28,71,103,.94) 0%,rgba(28,71,103,.8) 48%,rgba(28,71,103,.2) 85%)}
+.cover-text{position:relative;padding:56px 48px 44px;max-width:780px;color:#fff}
+.cover-text .eyebrow{color:var(--peach)}
+.cover-text h1{color:#fff;font-size:46px;line-height:1.1;margin-top:12px;font-weight:800}
+.cover-text p{font-size:17px;line-height:1.5;margin-top:16px;color:var(--primary-light);max-width:600px}
+.trust{display:flex;gap:12px;align-items:flex-start;margin-top:22px;max-width:600px;padding:12px 14px;background:rgba(255,255,255,.1);border-left:3px solid var(--peach)}
+.trust p{margin:0;font-size:14px;color:#fff}
+
+.cover-band{display:grid;grid-template-columns:220px 1fr 1fr 1fr;padding:30px 48px 34px;border-bottom:1px solid var(--gray-light)}
+.stat{padding-right:28px;border-right:1px solid var(--gray-light)}
+.stat .n{font-size:58px;font-weight:800;color:var(--primary);line-height:1}
+.stat .n small{font-size:22px;font-weight:700;margin-left:4px}
+.stat .l{font-size:13.5px;line-height:1.45;margin-top:8px}
+.comp{padding:0 26px;border-right:1px solid var(--gray-light);position:relative;isolation:isolate;min-height:150px}
+.comp:last-child{border-right:0;padding-right:0}
+.comp .wm{position:absolute;top:58px;right:20px;width:92px;height:92px;border-radius:50%;background:var(--white);border:4px solid var(--primary);display:flex;align-items:center;justify-content:center;z-index:-1;pointer-events:none}
+.comp:last-child .wm{right:-6px}
+.comp .wm svg{width:48px;height:48px}
+.comp .when,.comp h2,.comp p{text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 6px #fff,0 0 8px #fff}
+.comp .when{font-size:12px;font-weight:700;color:var(--gray-medium);text-transform:uppercase;letter-spacing:.06em}
+.comp h2{margin-top:6px}
+.comp p{font-size:13.5px;margin-top:6px;padding-right:104px}
+
+/* ---------- Línea de pasos ---------- */
+.steps-wrap{padding:30px 48px 0;overflow-x:auto}
+.timeline{position:relative;display:grid;grid-template-columns:repeat(7,1fr);min-width:760px;list-style:none}
+.timeline::before{content:"";position:absolute;left:8px;right:8px;top:9px;height:2px;background:var(--primary-light)}
+.step-btn{all:unset;cursor:pointer;display:block;position:relative;padding-right:14px}
+.step-btn .dot{width:20px;height:20px;border-radius:50%;background:var(--white);border:3px solid var(--line);position:relative;z-index:1;transition:border-color .2s,background .2s}
+.step-btn .t{display:block;font-size:12px;font-weight:700;color:var(--gray-medium);margin-top:10px;text-transform:uppercase;letter-spacing:.05em}
+.step-btn .nm{display:block;font-size:14px;font-weight:700;color:var(--gray-medium);margin-top:2px;line-height:1.3}
+.step-btn.done .dot{border-color:var(--primary);background:var(--primary)}
+.step-btn.done .nm{color:var(--caption)}
+.step-btn.current .dot{border-color:var(--orange)}
+.step-btn.current .nm{color:var(--caption)}
+.step-btn:focus-visible .dot{outline:2px solid var(--orange);outline-offset:3px}
+
+/* ---------- Paso ---------- */
+main{padding:28px 48px 48px}
+.step-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:40px;align-items:start}
+.why-inline{position:static!important}
+.why{background:var(--white-fao);border-top:3px solid var(--orange);padding:14px 16px 12px;position:sticky;top:76px}
+.why h3{margin-bottom:6px}
+.why p{font-size:13.5px;line-height:1.5}
+.why p + p{margin-top:8px}
+.fields{margin-top:22px;display:grid;grid-template-columns:1fr 1fr;gap:26px 24px}
+.field{grid-column:1 / -1;border:0;min-width:0}
+.field.half{grid-column:auto}
+.field[hidden]{display:none}
+.field > legend,.field > label.q{display:block;font-size:15px;font-weight:700;color:var(--caption);line-height:1.35;margin-bottom:4px;padding:0}
+.req{color:var(--orange);font-weight:700}
+.help{font-size:12.5px;line-height:1.5;color:var(--gray-medium);margin-bottom:10px;max-width:640px}
+.err{display:none;font-size:13px;font-weight:600;color:#B4570A;margin-top:8px}
+.field.invalid .err{display:block}
+
+input[type=text],input[type=number],textarea{width:100%;border:1px solid var(--line);background:var(--white);padding:10px 12px;border-radius:3px;font-size:15px;line-height:1.4;transition:border-color .15s}
+textarea{min-height:92px;resize:vertical}
+input:focus,textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
+.with-unit{display:flex;align-items:center;gap:10px}
+.with-unit input{max-width:160px}
+.with-unit span{font-size:13.5px;color:var(--gray-medium)}
+
+/* Opciones (radio / checkbox) */
+.opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.opt{position:relative;display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);background:var(--white);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.4;transition:background .15s,border-color .15s}
+.opt input{position:absolute;opacity:0;pointer-events:none}
+.opt .mk{flex:none;width:16px;height:16px;margin-top:1px;border:2px solid var(--line);background:var(--white);transition:all .15s}
+.opt.radio .mk{border-radius:50%}
+.opt:hover{border-color:var(--un-blue)}
+.opt.on{background:var(--primary-light);border-color:var(--primary);color:var(--caption);font-weight:600}
+.opt.on .mk{border-color:var(--primary);background:var(--primary)}
+.opt.radio.on .mk{background:var(--white);border:5px solid var(--primary)}
+.opt.off{opacity:.45;cursor:not-allowed}
+.opt:has(input:focus-visible){outline:2px solid var(--orange);outline-offset:2px}
+
+/* Chips de variedades */
+.chip-group + .chip-group{margin-top:12px}
+.chip-group h4{font-size:12px;font-weight:700;color:var(--gray-medium);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{position:relative;font-size:13px;font-weight:700;color:var(--primary);background:var(--white);border:1px solid var(--line);padding:6px 12px;border-radius:3px;cursor:pointer;transition:all .15s}
+.chip input{position:absolute;opacity:0;pointer-events:none}
+.chip.on{background:var(--primary-light);border-color:var(--primary)}
+.chip:has(input:focus-visible){outline:2px solid var(--orange);outline-offset:2px}
+.other-input{margin-top:10px;max-width:420px}
+
+/* Orden de prioridad */
+.rank{list-style:none;display:grid;gap:8px;max-width:560px}
+.rank li{display:grid;grid-template-columns:34px 1fr auto;gap:12px;align-items:center;padding:10px 12px;background:var(--white-fao);border-top:3px solid var(--primary)}
+.rank li:first-child{border-top-color:var(--orange)}
+.rank .pos{font-size:22px;font-weight:800;color:var(--primary);line-height:1}
+.rank li:first-child .pos{color:var(--orange)}
+.rank .lbl{font-size:14px;color:var(--caption);font-weight:600}
+.rank .mv{display:flex;gap:4px}
+.rank button{width:32px;height:32px;border:1px solid var(--line);background:var(--white);border-radius:3px;color:var(--primary);font-weight:700;cursor:pointer}
+.rank button:disabled{opacity:.35;cursor:default}
+
+/* Porcentajes */
+.pct{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-width:640px}
+.pct label{font-size:13px;font-weight:600;color:var(--caption);display:block;margin-bottom:4px}
+.pct .box{display:flex;align-items:center;gap:6px}
+.pct input{text-align:right}
+.pct .box span{font-weight:700;color:var(--gray-medium)}
+.bar{display:flex;height:10px;background:var(--gray-light);margin-top:12px;max-width:640px;overflow:hidden}
+.bar i{display:block;height:100%;transition:width .2s}
+.sum{font-size:13px;font-weight:700;margin-top:6px;color:var(--gray-medium)}
+.sum.ok{color:var(--primary)} .sum.warn{color:#B4570A}
+
+/* Matriz de control */
+.def{background:var(--caption);color:#fff;padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.def b{display:inline-block;font-size:15px;padding-bottom:2px;border-bottom:3px solid var(--peach);margin-bottom:4px}
+.def .is-ctrl b{border-color:var(--orange)}
+.def p{font-size:13.5px;line-height:1.45;color:#D4DEE8}
+.def .full{grid-column:1 / -1;font-size:13px;color:#fff;font-weight:600;border-top:1px solid rgba(255,255,255,.22);padding-top:10px}
+.mx{border-top:1px solid var(--gray-light)}
+.mx-row{display:grid;grid-template-columns:200px repeat(4,1fr);border-bottom:1px solid var(--gray-light)}
+.mx-row.head{font-size:12px;font-weight:700;color:var(--gray-medium);line-height:1.35}
+.mx-row.head > div{padding:10px 8px}
+.mx-row .rl{padding:12px 8px;font-size:14px;font-weight:700;color:var(--caption);align-self:center}
+.mx-cell{display:flex;align-items:center;justify-content:center;padding:6px;cursor:pointer;position:relative}
+.mx-cell input{position:absolute;opacity:0;pointer-events:none}
+.mx-cell .mk{width:20px;height:20px;border-radius:50%;border:2px solid var(--line);background:var(--white);transition:all .15s}
+.mx-cell:hover .mk{border-color:var(--un-blue)}
+.mx-cell.on .mk{border:6px solid var(--primary)}
+.mx-cell .ml{display:none}
+.mx-cell:has(input:focus-visible) .mk{outline:2px solid var(--orange);outline-offset:2px}
+
+/* Fotos */
+.photo-slots{display:grid;gap:12px}
+.slot{display:grid;grid-template-columns:1fr auto;gap:10px 16px;align-items:center;padding:12px 14px;border:1px solid var(--line);background:var(--white-fao)}
+.slot p{font-size:14px;color:var(--caption);font-weight:600}
+.slot .btn-sec{padding:8px 14px;font-size:13px}
+.thumbs{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:8px}
+.thumbs:empty{display:none}
+.thumb{position:relative;width:88px;height:88px;background:var(--gray-light) center/cover}
+.thumb button{position:absolute;top:4px;right:4px;width:24px;height:24px;border:0;border-radius:50%;background:rgba(28,71,103,.85);color:#fff;font-weight:700;cursor:pointer;line-height:24px}
+.photo-count{font-size:12.5px;color:var(--gray-medium);margin-top:8px}
+
+/* Consentimiento */
+.consent{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;background:var(--white-fao);border-top:3px solid var(--primary);cursor:pointer}
+.consent input{width:18px;height:18px;margin-top:2px;accent-color:var(--primary);flex:none}
+.consent span{font-size:13.5px;line-height:1.5}
+
+/* Navegación del formulario */
+.nav{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:34px;padding-top:20px;border-top:1px solid var(--gray-light)}
+.btn{font-weight:700;font-size:14.5px;border:0;border-radius:3px;padding:12px 22px;cursor:pointer;background:var(--primary);color:#fff;transition:background .15s}
+.btn:hover{background:var(--primary-hover)}
+.btn:disabled{opacity:.6;cursor:progress}
+.btn-sec{font-weight:700;font-size:14.5px;border:1px solid var(--primary);border-radius:3px;padding:11px 20px;cursor:pointer;background:var(--white);color:var(--primary)}
+.btn-sec:hover{background:var(--primary-light)}
+.saved{font-size:12.5px;color:var(--gray-medium)}
+.status{margin-top:16px;padding:12px 14px;font-size:14px;border-left:3px solid var(--orange);background:#FDEBDA;color:#7a3b06;display:none}
+.status.show{display:block}
+.status .btn-sec{margin-top:10px;font-size:13px;padding:8px 14px}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+
+/* ---------- Resultado ---------- */
+.done-grid{display:grid;grid-template-columns:1fr 440px;gap:40px;margin-top:24px;align-items:start}
+.summary{display:grid;grid-template-columns:1fr 1fr;gap:18px 26px}
+.summary div{border-top:3px solid var(--primary-light);padding-top:12px}
+.summary h3{color:var(--primary)}
+.summary p{font-size:13.5px;margin-top:5px}
+.photos-todo{margin-top:30px}
+.photos-todo h2{margin-bottom:10px}
+.photos-todo ul{list-style:none;display:grid;gap:8px}
+.photos-todo li{font-size:14px;line-height:1.45;padding-left:16px;position:relative}
+.photos-todo li::before{content:"";position:absolute;left:0;top:7px;width:6px;height:6px;background:var(--primary)}
+.photos-todo .small{margin-top:10px}
+.next{background:var(--primary);color:#fff;padding:24px 26px 0;display:flex;flex-direction:column}
+.next h2{color:#fff;font-size:20px}
+.next .sub{font-size:13.5px;color:var(--primary-light);margin-top:6px}
+.next ol{list-style:none;counter-reset:s;margin-top:14px}
+.next li{counter-increment:s;display:grid;grid-template-columns:34px 1fr;gap:6px;padding:10px 0;border-top:1px solid rgba(255,255,255,.22);font-size:13.5px;line-height:1.45}
+.next li:first-child{border-top:0}
+.next li::before{content:counter(s);font-size:22px;font-weight:800;line-height:1;color:var(--peach)}
+.next li b{display:block;font-size:14px}
+.next li span{color:#D4DEE8}
+.next .ask{margin:14px -26px 0;font-size:15px;font-weight:700;background:var(--caption);padding:16px 26px}
+
+/* ---------- Pie ---------- */
+.closing{background:var(--caption);color:#D4DEE8;padding:26px 48px;display:flex;align-items:center;justify-content:space-between;gap:24px;font-size:12.5px}
+.closing img{height:56px;width:auto;display:block}
+.closing p{max-width:520px;text-align:right}
+
+/* ---------- Animación de cambio de paso ---------- */
+.step-panel{animation:in .28s ease-out}
+@keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
+
+/* ---------- Responsive ---------- */
+@media (max-width:1000px){
+  .cover-band{grid-template-columns:1fr 1fr;gap:26px 0}
+  .stat{grid-column:1 / -1;border-right:0;padding-bottom:18px;border-bottom:1px solid var(--gray-light)}
+  .comp:nth-child(3){border-right:0}
+  .comp:last-child{grid-column:1 / -1;padding-left:0;padding-top:20px;border-top:1px solid var(--gray-light)}
+  .step-grid,.done-grid{grid-template-columns:1fr}
+  aside.why{display:none}
+  .why-inline{display:block!important;margin-top:16px}
+}
+@media (max-width:720px){
+  .topbar{padding:0 18px}
+  .section-name .long{display:none}
+  .cover-hero{min-height:0}
+  .cover-text{padding:40px 20px 28px}
+  .cover-text h1{font-size:32px}
+  .cover-text p{font-size:15.5px}
+  .cover-band{grid-template-columns:1fr;padding:24px 20px}
+  .comp{padding:18px 0 0!important;border-right:0!important;border-top:1px solid var(--gray-light);min-height:0}
+  .comp .wm{width:64px;height:64px;top:18px;right:0!important;border-width:3px}
+  .comp .wm svg{width:34px;height:34px}
+  .comp p{padding-right:80px}
+  .steps-wrap{padding:22px 20px 0}
+  .timeline{min-width:560px}
+  .step-btn .nm{font-size:12.5px}
+  main{padding:22px 20px 40px}
+  h1{font-size:27px}
+  .fields{grid-template-columns:1fr}
+  .def{grid-template-columns:1fr}
+  .mx-row.head{display:none}
+  .mx-row{grid-template-columns:1fr;padding:6px 0 10px}
+  .mx-row .rl{padding:8px 0 6px}
+  .mx-cell{justify-content:flex-start;gap:10px;padding:6px 0}
+  .mx-cell .ml{display:inline;font-size:14px}
+  .pct{grid-template-columns:1fr 1fr}
+  .summary{grid-template-columns:1fr}
+  .closing{flex-direction:column;align-items:flex-start;padding:24px 20px}
+  .closing p{text-align:left}
+  .nav{flex-wrap:wrap}
+}
+@media print{
+  .topbar,.steps-wrap,.nav,.closing{display:none}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a href="#inicio" aria-label="Tunjo Smart Solutions, ir al inicio"><img class="logo" id="logoTop" alt="Tunjo Smart Solutions"></a>
+  <div class="section-name" id="sectionName"><span class="long">Diagnóstico de fermentación y secado · </span><b>Inicio</b></div>
+</header>
+
+<section class="cover-hero" id="inicio">
+  <div class="cover-overlay"></div>
+  <div class="cover-text">
+    <div class="eyebrow">Diagnóstico para <span data-lead-name></span></div>
+    <h1>Cuéntanos cómo fermentas y secas hoy</h1>
+    <p>Con tus respuestas preparamos una propuesta de monitoreo y control para tus globos, tu secado y tus datos. Si no sabes algo, marca “No sé” y sigue.</p>
+    <div class="trust"><p>Aquí no te pedimos recetas, registros ni resultados de catación. Eso lo revisaremos juntos después de firmar un acuerdo de confidencialidad.</p></div>
+  </div>
+</section>
+
+<section class="cover-band" aria-label="Qué cubre el diagnóstico">
+  <div class="stat">
+    <div class="n">10<small>min</small></div>
+    <div class="l">para responder. Tus respuestas se guardan en este navegador mientras avanzas.</div>
+  </div>
+  <div class="comp">
+    <div class="wm" aria-hidden="true">
+      <svg viewBox="0 0 48 48" fill="none" stroke="#116AAB" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6h8M21 6v7c-7 2-12 8-12 16a15 15 0 0 0 30 0c0-8-5-14-12-16V6"/><path d="M14 30h20"/><path d="M24 22v8"/></svg>
+    </div>
+    <div class="when">En los globos</div>
+    <h2>Fermentación</h2>
+    <p>Medir, registrar y controlar dentro del WineGlobe sin cambiar tu forma de trabajar.</p>
+  </div>
+  <div class="comp">
+    <div class="wm" aria-hidden="true">
+      <svg viewBox="0 0 48 48" fill="none" stroke="#116AAB" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="16" r="6"/><path d="M24 4v2M36 16h2M10 16h2M32.5 7.5l-1.4 1.4M15.5 7.5l1.4 1.4"/><path d="M8 30h32M8 37h32"/><path d="M14 30v7M24 30v7M34 30v7"/></svg>
+    </div>
+    <div class="when">En la finca</div>
+    <h2>Secado</h2>
+    <p>Seguir humedad y temperatura, y automatizar lo que hoy depende del ojo.</p>
+  </div>
+  <div class="comp">
+    <div class="wm" aria-hidden="true">
+      <svg viewBox="0 0 48 48" fill="none" stroke="#116AAB" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="3"/><rect x="28" y="8" width="12" height="12" rx="3"/><rect x="18" y="28" width="12" height="12" rx="3"/><path d="M14 20v4h20v-4M24 24v4"/></svg>
+    </div>
+    <div class="when">Lo que ya tienes</div>
+    <h2>Datos</h2>
+    <p>Reunir tus registros actuales en un solo lugar, sin empezar de cero.</p>
+  </div>
+</section>
+
+<nav class="steps-wrap" aria-label="Pasos del diagnóstico">
+  <ol class="timeline" id="timeline"></ol>
+</nav>
+
+<main id="form-top">
+  <div id="panel"></div>
+</main>
+
+<footer class="closing">
+  <img id="logoWhite" alt="Tunjo Smart Solutions">
+  <p>Tunjo Smart Solutions usa estas respuestas solo para preparar tu propuesta. Nada se comparte con terceros.</p>
+</footer>
+
+<script>
+/* =========================================================
+   CONTENIDO DEL FORMULARIO
+   ========================================================= */
+const NOSE = ["nose", "No sé"];
+
+const STEPS = [
+  {
+    id: "operacion", name: "Tu operación",
+    title: "Empecemos por la finca",
+    lede: "Ya conocemos tu café. Aquí solo necesitamos saber dónde aplicaría la solución y por dónde quieres empezar.",
+    why: ["El orden que elijas define por dónde arranca la propuesta.",
+          "La certificación cambia qué materiales pueden tocar el café y qué insumos podemos sugerir."],
+    fields: [
+      { type: "text", path: "operacion.nombre", label: "¿Quién responde?", placeholder: "Tu nombre", required: true, half: true },
+      { type: "radio", path: "operacion.finca", label: "¿En qué finca aplicaría la solución?", required: true,
+        options: [["mariposa", "Finca Mariposa (Perú)"], ["golden", "Golden Farm (Etiopía)"], ["ambas", "Ambas"]] },
+      { type: "textarea", path: "operacion.diferencias", label: "¿Qué cambia entre las dos fincas?", when: "operacion.finca:ambas",
+        help: "Altura, volumen, equipos, forma de fermentar o de secar. Lo que te parezca relevante." },
+      { type: "rank", path: "operacion.prioridad", label: "Ordena por dónde quieres empezar",
+        help: "Usa las flechas. Arriba va lo más urgente.",
+        items: [["fermentacion", "Fermentación: medir y controlar en los globos"], ["secado", "Secado: monitorear y automatizar"], ["datos", "Datos: integrar lo que ya registras"]] },
+      { type: "radio", path: "operacion.certificacion", label: "¿Tus certificaciones (orgánica, Demeter u otras) limitan algo de lo que entra en contacto con el café?",
+        options: [["insumos", "Sí, limitan insumos (aditivos, cultivos, azúcares)"], ["materiales", "Sí, limitan materiales (sondas, superficies)"], ["ambos", "Sí, ambos"], ["no", "No"], NOSE] }
+    ]
+  },
+  {
+    id: "fermentacion", name: "Fermentación",
+    title: "Cómo fermentas en el WineGlobe",
+    lede: "Lo básico de un lote típico. Valores aproximados están bien.",
+    why: ["Volumen y carga definen el tamaño y la ubicación de la sonda.",
+          "Variedades, inóculo y sustratos nos dan una idea de los precursores y de la cinética que tendríamos que seguir. Solo preguntamos qué usas, no cuánto."],
+    fields: [
+      { type: "number", path: "fermentacion.globos", label: "¿Cuántos globos tienes en operación?", unit: "globos", half: true },
+      { type: "text", path: "fermentacion.volumen", label: "Volumen de cada globo", placeholder: "Ej. 300 L, o varios tamaños", half: true },
+      { type: "number", path: "fermentacion.carga_kg", label: "Café que cargas por lote", unit: "kg aprox.", half: true },
+      { type: "radio", path: "fermentacion.estado_entrada", label: "¿En qué estado entra el café al globo?",
+        options: [["cereza", "Cereza entera"], ["despulpado", "Despulpado, con mucílago"], ["otro", "Otro"], NOSE] },
+      { type: "chips", path: "fermentacion.variedades", label: "¿Qué variedades fermentas hoy en los globos?",
+        help: "Marca todas las que apliquen.",
+        groups: [
+          ["Tradicionales", [["typica", "Typica"], ["bourbon", "Bourbon (rojo o amarillo)"], ["caturra", "Caturra"], ["pache", "Pache"], ["mundo_novo", "Mundo Novo"]]],
+          ["Alto valor", [["geisha", "Geisha"], ["sl09", "SL09 / Gesha Inca"], ["java", "Java"], ["pacamara", "Pacamara"]]],
+          ["Resistentes a roya", [["catimor", "Catimor / Costa Rica 95"], ["catuai", "Catuaí"], ["marsellesa", "Marsellesa"], ["limani", "Limaní"], ["obata", "Obatá"], ["colombia", "Colombia"]]],
+          ["Etiopía", [["landraces", "Landraces / heirloom"]]],
+          ["", [["otra", "Otra"], ["nose", "No sé"]]]
+        ] },
+      { type: "radio", path: "fermentacion.duracion", label: "¿Cuánto dura una fermentación típica?",
+        options: [["lt24", "Menos de 24 h"], ["24_72", "24 a 72 h"], ["72_120", "72 a 120 h"], ["gt120", "Más de 120 h"], ["varia", "Varía mucho"]] },
+      { type: "radio", path: "fermentacion.inoculo", label: "¿Usan algún inóculo?",
+        options: [["espontanea", "No, fermentación espontánea"], ["mosto", "Sí, mosto de un lote anterior"], ["comercial", "Sí, un cultivo comercial"], NOSE] },
+      { type: "checks", path: "fermentacion.inoculo_tipo", label: "¿De qué tipo?", when: "fermentacion.inoculo:comercial",
+        options: [["levaduras", "Levaduras"], ["koji", "Koji"], ["lacticas", "Bacterias lácticas"], ["otro", "Otro"]] },
+      { type: "radio", path: "fermentacion.enzimas", label: "¿Usan enzimas?", options: [["si", "Sí"], ["no", "No"], NOSE] },
+      { type: "checks", path: "fermentacion.sustratos", label: "¿Agregan algún sustrato?", exclusive: "ninguno",
+        help: "Solo qué usan, no cuánto.",
+        options: [["fruta", "Fruta"], ["mosto_otras", "Mosto de otras fermentaciones"], ["azucar", "Sacarosa o panela"], ["miel", "Miel o mucílago"], ["otro", "Otro"], ["ninguno", "Ninguno"]] },
+      { type: "radio", path: "fermentacion.variabilidad", label: "¿Qué tanto varían tus lotes entre sí?",
+        options: [["poco", "Salen muy parecidos"], ["algo", "Algo"], ["mucho", "Mucho"], NOSE] }
+    ]
+  },
+  {
+    id: "medicion", name: "Medición",
+    title: "Qué mides dentro del globo",
+    lede: "Cómo sigues hoy la fermentación y qué te gustaría ver.",
+    why: ["Si ya tienes un sensor, podemos aprovecharlo o compararlo antes de proponer uno nuevo.",
+          "Saber qué quieres ver nos ayuda a elegir la sonda. No todas las variables se miden igual de bien sumergidas."],
+    fields: [
+      { type: "radio", path: "medicion.mide", label: "¿Hoy miden algo dentro del globo?", options: [["si", "Sí"], ["no", "No"]] },
+      { type: "radio", path: "medicion.modo", label: "¿Cómo lo miden?", when: "medicion.mide:si",
+        options: [["sumergido", "Con un sensor sumergido"], ["muestra", "Sacando una muestra"], ["ambos", "De las dos formas"]] },
+      { type: "radio", path: "medicion.frecuencia", label: "¿Con qué frecuencia?", when: "medicion.mide:si",
+        options: [["continuo", "Continuo"], ["varias_dia", "Varias veces al día"], ["diario", "Una vez al día"], ["menos", "Menos de una vez al día"]] },
+      { type: "checks", path: "medicion.variables", label: "¿Qué variables miden?", when: "medicion.mide:si",
+        options: [["temperatura", "Temperatura"], ["ph", "pH"], ["brix", "°Brix"], ["o2", "Oxígeno disuelto"], ["otro", "Otra"]] },
+      { type: "text", path: "medicion.sensor", label: "¿Qué sensor o electrodo usan?", when: "medicion.mide:si",
+        placeholder: "Marca y modelo, si los sabes" },
+      { type: "checks", path: "medicion.desea", label: "¿Qué te gustaría poder medir dentro del globo?", exclusive: "recomendacion",
+        options: [["temperatura", "Temperatura (en uno o varios puntos)"], ["ph", "pH"], ["brix", "°Brix / sólidos solubles"], ["o2", "Oxígeno disuelto"], ["orp", "Potencial redox (ORP)"], ["conductividad", "Conductividad"], ["nivel", "Nivel o volumen"], ["gas", "Gas: CO₂ o presión arriba del líquido"], ["otro", "Otra"], ["recomendacion", "No sé, quiero una recomendación"]] }
+    ]
+  },
+  {
+    id: "control", name: "Control",
+    title: "Qué controlas y para qué",
+    lede: "Medir y controlar no son lo mismo. Aquí solo nos interesa el control.",
+    why: ["Lo que hoy se ajusta a mano o con una regla fija es lo primero que se puede automatizar.",
+          "Saber si hay un objetivo de taza y dónde se cata nos dice si podremos conectar el proceso con el resultado. No te pedimos puntajes."],
+    fields: [
+      { type: "def" },
+      { type: "matrix", path: "control.variables", label: "Para cada variable, ¿cómo se controla hoy?",
+        rows: [["temperatura", "Temperatura"], ["ph", "pH"], ["gas", "Oxígeno / CO₂ (salida de gas)"], ["agitacion", "Agitación o recirculación"]],
+        cols: [["no", "No se controla"], ["manual", "A mano, cuando alguien lo nota"], ["regla", "Con una regla fija (horario, tiempo)"], ["auto", "Solo, con un equipo"]] },
+      { type: "checks", path: "control.fin", label: "¿Cómo decides cuándo termina la fermentación?",
+        options: [["tiempo", "Por tiempo"], ["ph", "Por pH"], ["brix", "Por °Brix"], ["sensorial", "Por olor o sabor"], ["otro", "Otro"]] },
+      { type: "radio", path: "control.objetivo", label: "¿Buscan un objetivo de taza con el control automático?",
+        options: [["puntaje", "Sí, un puntaje objetivo"], ["perfil", "Sí, un perfil sensorial"], ["ambos", "Ambos"], ["no_definido", "Aún no está definido"]] },
+      { type: "radio", path: "control.catacion", label: "¿Registran la catación de cada lote?",
+        options: [["puntaje", "Sí, con puntaje"], ["descriptores", "Sí, solo descriptores"], ["no", "No por lote"], NOSE] },
+      { type: "radio", path: "control.catacion_donde", label: "¿Dónde se hace la catación?",
+        options: [["finca", "En la finca"], ["tostaduria", "En la tostaduría"], ["externa", "Externa"], NOSE] }
+    ]
+  },
+  {
+    id: "secado", name: "Secado",
+    title: "Cómo secas en la finca",
+    lede: "Del beneficio al café listo para guardar.",
+    why: ["El tipo de beneficio define cuánta agua y mucílago llega al secado, y con eso el tiempo y el riesgo.",
+          "Los problemas frecuentes nos dicen qué conviene vigilar primero."],
+    fields: [
+      { type: "percent", path: "secado.beneficio", label: "¿Qué porcentaje del café que secas en la finca es…?",
+        help: "Aproximado. La suma debería dar 100 %.",
+        items: [["lavado", "Lavado"], ["honey", "Honey"], ["natural", "Natural"], ["otro", "Otro o experimental"]] },
+      { type: "checks", path: "secado.metodo", label: "¿Cómo secas?",
+        options: [["patio", "Patio al sol"], ["camas", "Camas elevadas"], ["marquesina", "Marquesina o secador solar"], ["mecanica", "Secadora mecánica o silo"], ["otro", "Otro"]] },
+      { type: "radio", path: "secado.calor", label: "¿Qué fuente de calor usa la secadora?", when: "secado.metodo:mecanica",
+        options: [["biomasa", "Leña o cascarilla"], ["gas", "Gas"], ["electrica", "Eléctrica"], ["otro", "Otra"]] },
+      { type: "radio", path: "secado.humedad", label: "¿Cómo sabes que el café está seco?",
+        options: [["medidor", "Con un medidor de humedad"], ["experiencia", "Al tacto o por experiencia"], ["tiempo", "Por tiempo"], NOSE] },
+      { type: "radio", path: "secado.duracion", label: "¿Cuánto tarda un secado típico?",
+        options: [["lt7", "Menos de una semana"], ["7_14", "1 a 2 semanas"], ["14_28", "2 a 4 semanas"], ["gt28", "Más de 4 semanas"], ["varia", "Varía mucho"]] },
+      { type: "checks", path: "secado.problemas", label: "¿Qué problemas aparecen con frecuencia?", exclusive: "ninguno",
+        options: [["disparejo", "Secado disparejo"], ["sobresecado", "Sobresecado"], ["lluvia", "Se rehumedece con la lluvia"], ["moho", "Moho o fermentación no deseada"], ["espacio", "Falta de espacio"], ["mano_obra", "Mucha mano de obra"], ["otro", "Otro"], ["ninguno", "Ninguno"]] }
+    ]
+  },
+  {
+    id: "datos", name: "Datos y sitio",
+    title: "Dónde están tus datos y qué hay en el sitio",
+    lede: "Qué registras hoy y con qué infraestructura contamos.",
+    why: ["No necesitamos ver tus registros todavía. Solo saber dónde están y si se pueden exportar.",
+          "Energía y conectividad definen si los equipos envían datos en vivo o los guardan y los envían después."],
+    fields: [
+      { type: "checks", path: "datos.registros", label: "¿Dónde registras hoy tu proceso?", exclusive: "nada",
+        options: [["papel", "En papel o bitácora"], ["hoja", "En hojas de cálculo (Excel o Sheets)"], ["software", "En un software o app"], ["plataforma", "En la plataforma de un sensor"], ["laboratorio", "Lo registra un laboratorio externo"], ["nada", "No se registra"]] },
+      { type: "radio", path: "datos.exporta", label: "¿Puedes exportar esos registros?", when: "datos.registros:hoja|software|plataforma",
+        options: [["si", "Sí"], ["no", "No"], NOSE] },
+      { type: "text", path: "datos.equipos", label: "Equipos o sensores que ya tienes", placeholder: "Marca y modelo, si los sabes" },
+      { type: "radio", path: "sitio.energia", label: "¿Hay energía eléctrica cerca de los globos y del secado?",
+        options: [["estable", "Sí, estable"], ["cortes", "Sí, con cortes"], ["solar", "Solar o generador"], ["no", "No hay cerca"], NOSE] },
+      { type: "checks", path: "sitio.conectividad", label: "¿Qué conectividad hay en la zona de proceso?", exclusive: "ninguna",
+        options: [["wifi", "WiFi"], ["celular_buena", "Buena señal celular"], ["celular_debil", "Señal celular débil"], ["ninguna", "Ninguna"]] },
+      { type: "checks", path: "sitio.condiciones", label: "¿Cómo es el ambiente donde irían los equipos?", exclusive: "ninguna",
+        options: [["humedad", "Mucha humedad"], ["lavado", "Se lava con agua a presión"], ["polvo", "Polvo"], ["temperatura", "Temperaturas extremas"], ["ninguna", "Nada especial"]] }
+    ]
+  },
+  {
+    id: "objetivos", name: "Objetivos y envío",
+    title: "Qué quieres lograr",
+    lede: "Lo último. Las fotos son opcionales y nos ahorran preguntas después.",
+    why: ["Las prioridades nos dicen cómo medir el éxito del proyecto contigo.",
+          "Las fotos son de equipos, no de tu proceso. Se guardan en una carpeta privada de Tunjo."],
+    fields: [
+      { type: "checks", path: "objetivos.prioridades", label: "¿Qué es lo más importante para ti?", max: 3,
+        help: "Elige hasta 3.",
+        options: [["consistencia", "Consistencia entre lotes"], ["calidad", "Calidad y puntaje de taza"], ["mano_obra", "Menos mano de obra"], ["trazabilidad", "Trazabilidad o certificación"], ["energia", "Eficiencia energética"], ["volumen", "Crecer en volumen"], ["otra", "Otra"]] },
+      { type: "textarea", path: "objetivos.dolor", label: "¿Qué es lo que más te cuesta hoy del proceso?", help: "En tus palabras." },
+      { type: "radio", path: "objetivos.horizonte", label: "¿Cuándo esperas tomar una decisión?",
+        options: [["lt3", "En menos de 3 meses"], ["3_6", "En 3 a 6 meses"], ["6_12", "En 6 a 12 meses"], ["sin_fecha", "Sin fecha aún"]] },
+      { type: "text", path: "objetivos.decide", label: "¿Quién toma la decisión?", placeholder: "Nombre o rol", half: true },
+      { type: "photos" },
+      { type: "consent", path: "consentimiento" }
+    ]
+  }
+];
+
+/* =========================================================
+   ESTADO
+   ========================================================= */
+const params = new URLSearchParams(location.search);
+const LEAD = (params.get("lead") || CONFIG.leadPorDefecto).toUpperCase();
+const LEAD_NAME = CONFIG.leads[LEAD] || LEAD;
+const LS_KEY = "tunjo-diag:" + LEAD;
+const LS_PHOTOS = LS_KEY + ":fotos";
+
+let state = { id: null, version: 0, step: 0, answers: {}, sent: false };
+let photos = []; // {slot, name, mime, data}
+
+function uid() {
+  return "D" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 6).toUpperCase();
+}
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+    if (s && s.answers) state = Object.assign(state, s);
+  } catch (e) {}
+  try { photos = JSON.parse(localStorage.getItem(LS_PHOTOS) || "[]"); } catch (e) { photos = []; }
+  if (!state.id) state.id = uid();
+  if (!get(state.answers, "operacion.prioridad")) set(state.answers, "operacion.prioridad", ["fermentacion", "secado", "datos"]);
+}
+let saveTimer = null;
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); flashSaved(); } catch (e) {}
+    try { localStorage.setItem(LS_PHOTOS, JSON.stringify(photos)); } catch (e) {}
+  }, 250);
+}
+function flashSaved() {
+  const el = document.getElementById("saved");
+  if (el) el.textContent = "Guardado en este navegador";
+}
+
+/* Helpers de rutas */
+function get(o, path) { return path.split(".").reduce((x, k) => (x == null ? undefined : x[k]), o); }
+function set(o, path, v) {
+  const ks = path.split("."); let x = o;
+  ks.slice(0, -1).forEach(k => { if (typeof x[k] !== "object" || x[k] === null) x[k] = {}; x = x[k]; });
+  x[ks[ks.length - 1]] = v;
+}
+function has(a, path, v) { const x = get(a, path); return Array.isArray(x) && x.includes(v); }
+function is(a, path, v) { return get(a, path) === v; }
+function whenOk(expr) {
+  if (!expr) return true;
+  const [path, vals] = expr.split(":");
+  const v = get(state.answers, path);
+  const list = vals.split("|");
+  if (Array.isArray(v)) return v.some(x => list.includes(x));
+  return list.includes(v);
+}
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* =========================================================
+   RENDER
+   ========================================================= */
+function renderTimeline() {
+  const tl = document.getElementById("timeline");
+  tl.innerHTML = STEPS.map((s, i) => {
+    const cls = i === state.step ? "current" : (i < state.step || stepTouched(i) ? "done" : "");
+    return `<li><button type="button" class="step-btn ${cls}" data-go="${i}" ${i === state.step ? 'aria-current="step"' : ""}>
+      <span class="dot"></span><span class="t">Paso ${i + 1}</span><span class="nm">${s.name}</span></button></li>`;
+  }).join("");
+}
+function stepTouched(i) {
+  return STEPS[i].fields.some(f => f.path && f.type !== "rank" && valuePresent(get(state.answers, f.path)));
+}
+function valuePresent(v) {
+  if (v == null || v === "") return false;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "object") return Object.values(v).some(valuePresent);
+  return true;
+}
+
+function renderStep() {
+  const s = STEPS[state.step];
+  const panel = document.getElementById("panel");
+  panel.innerHTML = `
+    <div class="step-panel">
+      <div class="step-grid">
+        <div>
+          <div class="eyebrow">Paso ${state.step + 1} de ${STEPS.length}</div>
+          <h1>${s.title}</h1>
+          <p class="lede">${s.lede}</p>
+          <div class="why why-inline" style="display:none"><h3>Por qué lo preguntamos</h3>${s.why.map(p => `<p>${p}</p>`).join("")}</div>
+          <div class="fields">${s.fields.map(renderField).join("")}</div>
+          ${state.step === STEPS.length - 1 ? `<div class="hp" aria-hidden="true"><label>No llenar <input type="text" id="hp" tabindex="-1" autocomplete="off"></label></div>` : ""}
+          <div class="status" id="status" role="alert"></div>
+          <div class="nav">
+            ${state.step > 0 ? `<button type="button" class="btn-sec" data-go="${state.step - 1}">Anterior</button>` : `<span class="saved" id="saved"></span>`}
+            ${state.step > 0 ? `<span class="saved" id="saved"></span>` : ""}
+            ${state.step < STEPS.length - 1
+              ? `<button type="button" class="btn" data-next>Siguiente: ${STEPS[state.step + 1].name}</button>`
+              : `<button type="button" class="btn" id="sendBtn">Enviar diagnóstico</button>`}
+          </div>
+        </div>
+        <aside class="why" aria-label="Por qué lo preguntamos">
+          <h3>Por qué lo preguntamos</h3>
+          ${s.why.map(p => `<p>${p}</p>`).join("")}
+        </aside>
+      </div>
+    </div>`;
+  document.getElementById("sectionName").innerHTML = `<span class="long">Diagnóstico de fermentación y secado · </span><b>${s.name}</b>`;
+  renderTimeline();
+  refreshVisibility();
+  refreshDerived();
+}
+
+function fieldWrap(f, inner, isGroup) {
+  const tag = isGroup ? "fieldset" : "div";
+  const req = f.required ? ' <span class="req" aria-hidden="true">*</span>' : "";
+  const lab = isGroup ? `<legend>${f.label}${req}</legend>` : `<label class="q" for="f-${f.path}">${f.label}${req}</label>`;
+  return `<${tag} class="field ${f.half ? "half" : ""}" data-field="${f.path || f.type}" ${f.when ? `data-when="${f.when}"` : ""}>
+    ${f.label ? lab : ""}${f.help ? `<p class="help">${f.help}</p>` : ""}${inner}
+    ${f.required ? `<p class="err">Este dato es necesario para continuar.</p>` : ""}</${tag}>`;
+}
+
+function renderField(f) {
+  const v = f.path ? get(state.answers, f.path) : undefined;
+  switch (f.type) {
+    case "text":
+      return fieldWrap(f, `<input type="text" id="f-${f.path}" data-path="${f.path}" value="${esc(v)}" placeholder="${esc(f.placeholder || "")}" ${f.required ? "required" : ""} autocomplete="off">`);
+    case "number":
+      return fieldWrap(f, `<div class="with-unit"><input type="number" inputmode="decimal" min="0" id="f-${f.path}" data-path="${f.path}" value="${esc(v)}"><span>${f.unit || ""}</span></div>`);
+    case "textarea":
+      return fieldWrap(f, `<textarea id="f-${f.path}" data-path="${f.path}">${esc(v)}</textarea>`);
+    case "radio":
+      return fieldWrap(f, `<div class="opts">${f.options.map(([val, lab]) =>
+        `<label class="opt radio ${v === val ? "on" : ""}"><input type="radio" name="${f.path}" value="${val}" data-path="${f.path}" ${v === val ? "checked" : ""}><span class="mk"></span><span>${lab}</span></label>`).join("")}</div>`, true);
+    case "checks": {
+      const arr = Array.isArray(v) ? v : [];
+      return fieldWrap(f, `<div class="opts" data-max="${f.max || ""}">${f.options.map(([val, lab]) =>
+        `<label class="opt ${arr.includes(val) ? "on" : ""}"><input type="checkbox" value="${val}" data-path="${f.path}" data-multi ${f.exclusive ? `data-excl="${f.exclusive}"` : ""} ${arr.includes(val) ? "checked" : ""}><span class="mk"></span><span>${lab}</span></label>`).join("")}</div>`, true);
+    }
+    case "chips": {
+      const arr = Array.isArray(v) ? v : [];
+      const other = get(state.answers, f.path + "_otra") || "";
+      return fieldWrap(f, f.groups.map(([g, opts]) => `<div class="chip-group">${g ? `<h4>${g}</h4>` : ""}<div class="chips">${opts.map(([val, lab]) =>
+        `<label class="chip ${arr.includes(val) ? "on" : ""}"><input type="checkbox" value="${val}" data-path="${f.path}" data-multi data-excl="nose" ${arr.includes(val) ? "checked" : ""}>${lab}</label>`).join("")}</div></div>`).join("")
+        + `<input type="text" class="other-input" data-path="${f.path}_otra" value="${esc(other)}" placeholder="¿Cuál otra?" data-when-local="${f.path}:otra" aria-label="Otra variedad">`, true);
+    }
+    case "rank": {
+      const order = Array.isArray(v) ? v : f.items.map(i => i[0]);
+      const labels = Object.fromEntries(f.items);
+      return fieldWrap(f, `<ol class="rank" data-rank="${f.path}">${order.map((k, i) =>
+        `<li><span class="pos">${i + 1}</span><span class="lbl">${labels[k]}</span><span class="mv">
+          <button type="button" data-mv="-1" data-k="${k}" ${i === 0 ? "disabled" : ""} aria-label="Subir ${labels[k]}">↑</button>
+          <button type="button" data-mv="1" data-k="${k}" ${i === order.length - 1 ? "disabled" : ""} aria-label="Bajar ${labels[k]}">↓</button></span></li>`).join("")}</ol>`, true);
+    }
+    case "percent": {
+      const o = v || {};
+      return fieldWrap(f, `<div class="pct">${f.items.map(([k, lab]) =>
+        `<div><label for="p-${k}">${lab}</label><div class="box"><input type="number" inputmode="numeric" min="0" max="100" id="p-${k}" data-path="${f.path}.${k}" value="${esc(o[k])}"><span>%</span></div></div>`).join("")}</div>
+        <div class="bar" aria-hidden="true">${f.items.map(([k], i) => `<i data-bar="${k}" style="background:${["#116AAB", "#5792C9", "#F58320", "#1C4767"][i]}"></i>`).join("")}</div>
+        <p class="sum" id="pctSum" aria-live="polite"></p>`, true);
+    }
+    case "def":
+      return `<div class="field"><div class="def">
+        <div><b>Medir</b><p>Saber cómo va el proceso. Por ejemplo, leer la temperatura.</p></div>
+        <div class="is-ctrl"><b>Controlar</b><p>Actuar para mantener una variable en un objetivo. Por ejemplo, enfriar cuando pasa de 22 °C.</p></div>
+        <p class="full">En este paso solo preguntamos por control.</p></div></div>`;
+    case "matrix": {
+      const o = v || {};
+      return fieldWrap(f, `<div class="mx" role="group">
+        <div class="mx-row head"><div></div>${f.cols.map(([, l]) => `<div>${l}</div>`).join("")}</div>
+        ${f.rows.map(([rk, rl]) => `<div class="mx-row" role="radiogroup" aria-label="${rl}"><div class="rl">${rl}</div>${f.cols.map(([ck, cl]) =>
+          `<label class="mx-cell ${o[rk] === ck ? "on" : ""}"><input type="radio" name="${f.path}.${rk}" value="${ck}" data-path="${f.path}.${rk}" ${o[rk] === ck ? "checked" : ""} aria-label="${rl}: ${cl}"><span class="mk"></span><span class="ml">${cl}</span></label>`).join("")}</div>`).join("")}
+      </div>`, true);
+    }
+    case "photos":
+      return `<div class="field" data-field="photos"><span class="q" style="display:block;font-size:15px;font-weight:700;color:var(--caption);margin-bottom:4px">Fotos de tus equipos (opcional)</span>
+        <p class="help">Hasta ${CONFIG.maxFotos} fotos. Las reducimos antes de enviarlas para que suban rápido.</p>
+        <div class="photo-slots" id="photoSlots"></div><p class="photo-count" id="photoCount"></p></div>`;
+    case "consent": {
+      const c = !!get(state.answers, f.path);
+      return `<div class="field" data-field="consentimiento"><label class="consent"><input type="checkbox" data-path="consentimiento" data-bool ${c ? "checked" : ""}>
+        <span>Autorizo a Tunjo Smart Solutions a tratar los datos de este formulario solo para preparar una propuesta, conforme a la Ley 1581 de 2012 de protección de datos personales.</span></label>
+        <p class="err">Necesitamos tu autorización para recibir el diagnóstico.</p></div>`;
+    }
+  }
+  return "";
+}
+
+/* Visibilidad condicional y elementos derivados */
+function refreshVisibility() {
+  document.querySelectorAll("[data-when]").forEach(el => { el.hidden = !whenOk(el.dataset.when); });
+  document.querySelectorAll("[data-when-local]").forEach(el => { el.hidden = !whenOk(el.dataset.whenLocal); });
+}
+function refreshDerived() {
+  // Porcentajes
+  const sumEl = document.getElementById("pctSum");
+  if (sumEl) {
+    const o = get(state.answers, "secado.beneficio") || {};
+    const total = Object.values(o).reduce((s, x) => s + (parseFloat(x) || 0), 0);
+    document.querySelectorAll("[data-bar]").forEach(b => {
+      const x = parseFloat(o[b.dataset.bar]) || 0;
+      b.style.width = Math.min(100, total > 100 ? x / total * 100 : x) + "%";
+    });
+    if (total === 0) { sumEl.textContent = ""; sumEl.className = "sum"; }
+    else if (Math.round(total) === 100) { sumEl.textContent = "Suma: 100 %"; sumEl.className = "sum ok"; }
+    else if (total < 100) { sumEl.textContent = `Suma: ${+total.toFixed(1)} %. Falta ${+(100 - total).toFixed(1)} %.`; sumEl.className = "sum warn"; }
+    else { sumEl.textContent = `Suma: ${+total.toFixed(1)} %. Sobra ${+(total - 100).toFixed(1)} %.`; sumEl.className = "sum warn"; }
+  }
+  // Límite de opciones
+  document.querySelectorAll(".opts[data-max]").forEach(g => {
+    const max = parseInt(g.dataset.max); if (!max) return;
+    const n = g.querySelectorAll("input:checked").length;
+    g.querySelectorAll(".opt").forEach(o => {
+      const inp = o.querySelector("input");
+      const block = n >= max && !inp.checked;
+      inp.disabled = block; o.classList.toggle("off", block);
+    });
+  });
+  renderPhotoSlots();
+}
+
+/* =========================================================
+   EVENTOS
+   ========================================================= */
+document.addEventListener("input", e => {
+  const t = e.target;
+  if (!t.dataset || !t.dataset.path || t.type === "checkbox" || t.type === "radio") return;
+  set(state.answers, t.dataset.path, t.type === "number" ? (t.value === "" ? "" : Number(t.value)) : t.value);
+  const fld = t.closest(".field"); if (fld) fld.classList.remove("invalid");
+  refreshDerived(); save();
+});
+
+document.addEventListener("change", e => {
+  const t = e.target;
+  if (!t.dataset || !t.dataset.path) return;
+  const path = t.dataset.path;
+  if (t.dataset.bool !== undefined) {
+    set(state.answers, path, t.checked);
+    t.closest(".field").classList.remove("invalid");
+  } else if (t.type === "radio") {
+    set(state.answers, path, t.value);
+    const scope = t.closest(".opts, .mx-row");
+    scope.querySelectorAll("label").forEach(l => l.classList.toggle("on", l.querySelector("input").checked));
+    const fld = t.closest(".field"); if (fld) fld.classList.remove("invalid");
+  } else if (t.dataset.multi !== undefined) {
+    let arr = (get(state.answers, path) || []).slice();
+    const excl = t.dataset.excl;
+    if (t.checked) {
+      if (excl && t.value === excl) arr = [excl];
+      else arr = arr.filter(x => x !== excl).concat(t.value);
+    } else arr = arr.filter(x => x !== t.value);
+    set(state.answers, path, arr);
+    const scope = t.closest(".field");
+    scope.querySelectorAll("input[data-multi]").forEach(i => {
+      i.checked = arr.includes(i.value);
+      i.closest("label").classList.toggle("on", i.checked);
+    });
+  }
+  refreshVisibility(); refreshDerived(); save();
+});
+
+document.addEventListener("click", e => {
+  const go = e.target.closest("[data-go]");
+  if (go) { goTo(parseInt(go.dataset.go)); return; }
+  if (e.target.closest("[data-next]")) {
+    if (state.step === 0 && !validate([0])) return;
+    goTo(state.step + 1); return;
+  }
+  const mv = e.target.closest("[data-mv]");
+  if (mv) {
+    const path = mv.closest("[data-rank]").dataset.rank;
+    const order = (get(state.answers, path) || []).slice();
+    const i = order.indexOf(mv.dataset.k), j = i + parseInt(mv.dataset.mv);
+    if (j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    set(state.answers, path, order);
+    const f = STEPS[state.step].fields.find(x => x.path === path);
+    const fld = mv.closest(".field");
+    fld.outerHTML = renderField(f);
+    const btn = document.querySelector(`[data-rank="${path}"] [data-k="${mv.dataset.k}"][data-mv="${mv.dataset.mv}"]`);
+    (btn && !btn.disabled ? btn : document.querySelector(`[data-rank="${path}"] [data-k="${mv.dataset.k}"]:not(:disabled)`))?.focus();
+    save(); return;
+  }
+  if (e.target.id === "sendBtn") { submit(); return; }
+  if (e.target.closest("[data-addphoto]")) {
+    const slot = e.target.closest("[data-addphoto]").dataset.addphoto;
+    pickPhoto(slot); return;
+  }
+  const rm = e.target.closest("[data-rmphoto]");
+  if (rm) { photos.splice(parseInt(rm.dataset.rmphoto), 1); renderPhotoSlots(); save(); return; }
+  if (e.target.id === "downloadBtn") { downloadBackup(); return; }
+  if (e.target.id === "editBtn") { state.sent = false; state.step = 0; save(); renderStep(); scrollToForm(); return; }
+});
+
+function goTo(i) {
+  if (state.sent) { state.sent = false; }
+  state.step = Math.max(0, Math.min(STEPS.length - 1, i));
+  save(); renderStep(); scrollToForm();
+}
+function scrollToForm() {
+  const top = document.querySelector(".steps-wrap").getBoundingClientRect().top + window.scrollY - 64;
+  window.scrollTo({ top, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+
+/* =========================================================
+   FOTOS
+   ========================================================= */
+function renderPhotoSlots() {
+  const box = document.getElementById("photoSlots");
+  if (!box) return;
+  const slots = PHOTO_RULES.filter(r => r.when(state.answers));
+  box.innerHTML = slots.map(r => {
+    const mine = photos.map((p, i) => ({ p, i })).filter(x => x.p.slot === r.id);
+    return `<div class="slot"><p>${r.text}</p>
+      <button type="button" class="btn-sec" data-addphoto="${r.id}" ${photos.length >= CONFIG.maxFotos ? "disabled" : ""}>Agregar foto</button>
+      <div class="thumbs">${mine.map(x => `<div class="thumb" style="background-image:url(data:${x.p.mime};base64,${x.p.data})"><button type="button" data-rmphoto="${x.i}" aria-label="Quitar foto">×</button></div>`).join("")}</div></div>`;
+  }).join("");
+  document.getElementById("photoCount").textContent = photos.length ? `${photos.length} de ${CONFIG.maxFotos} fotos` : "";
+}
+function pickPhoto(slot) {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "image/*"; inp.multiple = true;
+  inp.onchange = async () => {
+    for (const file of Array.from(inp.files)) {
+      if (photos.length >= CONFIG.maxFotos) break;
+      try {
+        const data = await compress(file);
+        photos.push({ slot, name: `${slot}-${photos.length + 1}.jpg`, mime: "image/jpeg", data });
+      } catch (e) { showStatus("No pudimos leer una de las fotos. Prueba con otra o envíala después."); }
+    }
+    renderPhotoSlots(); save();
+  };
+  inp.click();
+}
+function compress(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const max = 1600, r = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * r); c.height = Math.round(img.height * r);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      res(c.toDataURL("image/jpeg", 0.72).split(",")[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("img")); };
+    img.src = url;
+  });
+}
+
+/* =========================================================
+   VALIDACIÓN Y ENVÍO
+   ========================================================= */
+function validate(stepsIdx) {
+  for (const si of stepsIdx) {
+    const s = STEPS[si];
+    const missing = s.fields.filter(f => f.required && !valuePresent(get(state.answers, f.path)));
+    if (missing.length) {
+      if (state.step !== si) { state.step = si; renderStep(); }
+      missing.forEach(f => document.querySelector(`[data-field="${f.path}"]`)?.classList.add("invalid"));
+      const first = document.querySelector(".field.invalid input, .field.invalid");
+      first?.focus?.(); scrollToForm();
+      return false;
+    }
+  }
+  return true;
+}
+
+function pruned() {
+  const out = JSON.parse(JSON.stringify(state.answers));
+  STEPS.forEach(s => s.fields.forEach(f => {
+    if (f.when && !whenOk(f.when)) {
+      const ks = f.path.split("."); const parent = get(out, ks.slice(0, -1).join("."));
+      if (parent) delete parent[ks[ks.length - 1]];
+    }
+  }));
+  if (!has(state.answers, "fermentacion.variedades", "otra") && out.fermentacion) delete out.fermentacion.variedades_otra;
+  return out;
+}
+
+function buildPayload() {
+  return {
+    token: CONFIG.token,
+    hp: (document.getElementById("hp") || {}).value || "",
+    id: state.id,
+    version: state.version + 1,
+    lead: LEAD,
+    lead_name: LEAD_NAME,
+    submitted_at: new Date().toISOString(),
+    answers: pruned(),
+    photos: photos.map(p => ({ slot: p.slot, name: p.name, mime: p.mime, data: p.data }))
+  };
+}
+
+async function submit() {
+  if (!validate([0])) return;
+  if (!get(state.answers, "consentimiento")) {
+    document.querySelector('[data-field="consentimiento"]').classList.add("invalid");
+    document.querySelector('[data-path="consentimiento"]').focus();
+    return;
+  }
+  const btn = document.getElementById("sendBtn");
+  const payload = buildPayload();
+  if (!CONFIG.endpoint) {
+    showStatus("Falta configurar el enlace de envío de este formulario. Descarga una copia de tus respuestas y envíanosla.", true);
+    return;
+  }
+  btn.disabled = true; btn.textContent = "Enviando…";
+  try {
+    const r = await fetch(CONFIG.endpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
+    let ok = r.ok;
+    try { const j = await r.json(); ok = ok && j.ok !== false; } catch (e) {}
+    if (!ok) throw new Error("respuesta");
+    state.version = payload.version; state.sent = true; save();
+    renderDone();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = "Enviar diagnóstico";
+    showStatus("No pudimos enviar el diagnóstico. Revisa tu conexión y vuelve a intentarlo. Tus respuestas siguen guardadas aquí.", true);
+  }
+}
+function showStatus(msg, withDownload) {
+  const s = document.getElementById("status");
+  if (!s) return;
+  s.innerHTML = esc(msg) + (withDownload ? `<br><button type="button" class="btn-sec" id="downloadBtn">Descargar copia de tus respuestas</button>` : "");
+  s.classList.add("show");
+}
+function downloadBackup() {
+  const p = buildPayload(); delete p.token;
+  const blob = new Blob([JSON.stringify(p, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = `diagnostico-${LEAD}-${state.id}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* =========================================================
+   PANTALLA FINAL
+   ========================================================= */
+const LABELS = {
+  finca: { mariposa: "Finca Mariposa (Perú)", golden: "Golden Farm (Etiopía)", ambas: "Finca Mariposa y Golden Farm" },
+  linea: { fermentacion: "Fermentación", secado: "Secado", datos: "Datos" }
+};
+function renderDone() {
+  const a = state.answers;
+  const pending = PHOTO_RULES.filter(r => r.when(a) && !photos.some(p => p.slot === r.id)).slice(0, CONFIG.maxItemsChecklist);
+  const nda = NDA_RULES.filter(r => r.when(a)).slice(0, CONFIG.maxItemsChecklist);
+  const prio = (get(a, "operacion.prioridad") || []).map(k => LABELS.linea[k]).join(", luego ");
+  const nombre = (get(a, "operacion.nombre") || "").trim().split(" ")[0];
+  document.getElementById("panel").innerHTML = `
+    <div class="step-panel">
+      <div class="eyebrow">Diagnóstico enviado</div>
+      <h1>Gracias${nombre ? ", " + esc(nombre) : ""}. Recibimos tu diagnóstico.</h1>
+      <p class="lede">Lo revisamos y te contactamos para agendar la conversación. Si quieres cambiar algo, puedes volver a este enlace y enviarlo de nuevo.</p>
+      <div class="done-grid">
+        <div>
+          <div class="summary">
+            <div><h3>Finca</h3><p>${esc(LABELS.finca[get(a, "operacion.finca")] || "—")}</p></div>
+            <div><h3>Por dónde empezar</h3><p>${esc(prio || "—")}</p></div>
+            <div><h3>Fotos enviadas</h3><p>${photos.length ? photos.length + (photos.length === 1 ? " foto" : " fotos") : "Ninguna por ahora"}</p></div>
+            <div><h3>Referencia</h3><p>${esc(state.id)} · versión ${state.version}</p></div>
+          </div>
+          ${pending.length ? `<div class="photos-todo"><h2>Fotos que nos ayudarían</h2><ul>${pending.map(r => `<li>${r.text}</li>`).join("")}</ul>
+            <p class="small">Puedes agregarlas en el último paso y enviar de nuevo.</p></div>` : ""}
+          <div class="nav"><button type="button" class="btn-sec" id="editBtn">Revisar mis respuestas</button><span></span></div>
+        </div>
+        <section class="next" aria-labelledby="nda-title">
+          <h2 id="nda-title">Ten esto listo para después del acuerdo de confidencialidad</h2>
+          <p class="sub">No lo envíes todavía. Lo revisaremos juntos.</p>
+          <ol>${nda.map(r => `<li><div><b>${r.text}</b><span>${r.detail || ""}</span></div></li>`).join("")}</ol>
+          <div class="ask">Hablemos después de firmar el acuerdo.</div>
+        </section>
+      </div>
+    </div>`;
+  document.getElementById("sectionName").innerHTML = `<span class="long">Diagnóstico de fermentación y secado · </span><b>Enviado</b>`;
+  document.querySelectorAll(".step-btn").forEach(b => { b.classList.remove("current"); b.classList.add("done"); b.removeAttribute("aria-current"); });
+  scrollToForm();
+}
+
+/* =========================================================
+   INICIO
+   ========================================================= */
+function initAssets() {
+  const top = document.getElementById("logoTop");
+  top.src = ASSETS.logoPropio;
+  top.onerror = () => { top.replaceWith(Object.assign(document.createElement("span"), { className: "logo-fallback", textContent: "Tunjo" })); };
+  const w = document.getElementById("logoWhite");
+  w.src = ASSETS.logoBlanco; w.onerror = () => w.remove();
+  if (ASSETS.portada) document.querySelector(".cover-hero").style.backgroundImage = `url("${ASSETS.portada}")`;
+  document.querySelectorAll("[data-lead-name]").forEach(el => el.textContent = LEAD_NAME);
+}
+initAssets();
+load();
+if (state.sent) { renderTimeline(); renderDone(); window.scrollTo(0, 0); } else { renderStep(); }
+</script>
+</body>
+</html>
