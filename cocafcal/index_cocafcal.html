@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html lang="es">
 <head>
@@ -1029,14 +1030,15 @@ async function submit() {
   btn.disabled = true; btn.textContent = "Enviando…";
   try {
     const r = await fetch(CONFIG.endpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
-    let ok = r.ok;
-    try { const j = await r.json(); ok = ok && j.ok !== false; } catch (e) {}
-    if (!ok) throw new Error("respuesta");
+    let ok = r.ok, code = r.ok ? "" : "http-" + r.status;
+    try { const j = await r.json(); ok = ok && j.ok !== false; if (j.error) code = j.error; } catch (e) { code = code || "respuesta-no-json"; }
+    if (!ok) throw new Error(code || "respuesta");
     state.version = payload.version; state.sent = true; save();
     renderDone();
   } catch (e) {
+    console.warn("Envío no confirmado:", e.message);
     btn.disabled = false; btn.textContent = "Enviar diagnóstico";
-    showStatus("No se pudo enviar. Revise su conexión e inténtelo de nuevo: sus respuestas siguen guardadas aquí.", true);
+    showStatus("No se pudo enviar. Revise su conexión e inténtelo de nuevo: sus respuestas siguen guardadas aquí." + (e.message && e.message !== "Failed to fetch" ? " (código: " + e.message + ")" : ""), true);
   }
 }
 function showStatus(msg, withDownload) {
