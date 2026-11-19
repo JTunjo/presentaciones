@@ -1,0 +1,1110 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="robots" content="noindex, nofollow">
+<title>Diagnóstico de fermentación y secado · Tunjo Smart Solutions</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Open+Sans:wght@400;600;700;800&display=swap" rel="stylesheet">
+
+<script>
+/* =========================================================
+   CONFIGURACIÓN — edite aquí sin tocar la lógica de abajo.
+   ========================================================= */
+const ASSETS = {
+  logoPropio:  "https://raw.githubusercontent.com/JTunjo/asset_hosting/refs/heads/main/Tunjo_h.png",     // Logo horizontal (barra superior)
+  logoBlanco:  "https://raw.githubusercontent.com/JTunjo/asset_hosting/refs/heads/main/TunjoWhite.png",  // Logo blanco (cierre oscuro)
+  portada:     "https://raw.githubusercontent.com/JTunjo/asset_hosting/refs/heads/main/portada.png"      // Foto horizontal de portada (≥ 1600×700)
+};
+
+const CONFIG = {
+  endpoint: "",                 // URL del Web App de Apps Script (termina en /exec)
+  token:    "cambia-este-token",// Debe coincidir con TOKEN en code_cocafcal.gs
+  maxFotos: 6,
+  maxItemsChecklist: 7,
+  leadPorDefecto: "COCAFCAL",
+  leads: {                      // Código que va en ?lead=CODIGO → nombre visible
+    COCAFCAL: "Cocafcal"
+  },
+  politica: {                   // Política de uso de datos enlazada en la autorización
+    url: "politica-datos-cocafcal.html",
+    version: "1.0 · 18 de noviembre de 2026"
+  }
+};
+
+/* ---------------------------------------------------------
+   REGLAS DE LA PANTALLA FINAL
+   a = respuestas. Helpers: has(a,"ruta","valor"), is(a,"ruta","valor"), get(a,"ruta")
+   --------------------------------------------------------- */
+// Fotos que pueden subir ya (y que se recuerdan si no las subieron)
+const PHOTO_RULES = [
+  { id: "tapa",    when: (a) => true,
+    text: "La tapa de una caneca con su airlock, vista desde arriba." },
+  { id: "canecas", when: (a) => true,
+    text: "El lugar donde fermentan las canecas." },
+  { id: "medicion", when: (a) => is(a, "medicion.mide", "si"),
+    text: "El equipo con el que miden hoy (sensor, pHmetro, refractómetro)." },
+  { id: "secado",  when: (a) => (get(a, "secado.metodo") || []).length > 0,
+    text: "Las áreas de secado." }
+];
+
+// “Lo que conviene preparar”
+const NDA_RULES = [
+  { when: (a) => true,
+    text: "La medida del diámetro de la tapa y del airlock.",
+    detail: "Con eso definimos cómo entra la sonda sin perder el sello." },
+  { when: (a) => true,
+    text: "El registro de un lote fermentado reciente.",
+    detail: "Horas, temperaturas, notas: tal como lo tengan." },
+  { when: (a) => ["fincas", "ambos"].includes(get(a, "cooperativa.donde")),
+    text: "La lista de sitios con canecas, con su comunidad y si tienen señal celular.",
+    detail: "Define cuántos equipos de comunicación se necesitan." },
+  { when: (a) => ["puntaje", "descriptores"].includes(get(a, "medicion.catacion")),
+    text: "Los resultados de catación de lotes fermentados recientes.",
+    detail: "Así conectamos proceso y taza desde el inicio." },
+  { when: (a) => ["software", "trazabilidad", "laboratorio"].some(v => has(a, "datos.registros", v)),
+    text: "El nombre de sus sistemas de laboratorio o trazabilidad y quién los administra.",
+    detail: "Para planear la conexión de datos." },
+  { when: (a) => ["consejo", "asamblea"].includes(get(a, "plan.aprueba")),
+    text: "La fecha de la próxima reunión en que se puede aprobar el proyecto.",
+    detail: "Ajustamos el plan para llegar a tiempo." },
+  { when: (a) => ["proyecto", "credito"].includes(get(a, "plan.financiamiento")),
+    text: "Los requisitos del financiador para propuestas: formato y plazos.",
+    detail: "Preparamos la propuesta en el formato que piden." }
+];
+
+// Ruta preliminar: fases según la prioridad que eligieron
+function buildPlan(a) {
+  const prio = get(a, "cooperativa.prioridad") || ["fermentacion", "secado", "datos"];
+  const donde = get(a, "cooperativa.donde");
+  const inicio = get(a, "plan.inicio");
+  const cuando = inicio === "esta" ? "durante esta cosecha" : inicio === "proxima" ? "antes de la próxima cosecha" : "en la fecha que acordemos";
+  const lugar = donde === "fincas" ? "una finca de socio" : "el beneficio central";
+  const nPil = parseInt(get(a, "plan.piloto_canecas")) || 0;
+  const nTot = parseInt(get(a, "fermentadores.canecas")) || 0;
+  const nSit = parseInt(get(a, "cooperativa.sitios")) || 0;
+  const zonas = parseInt(get(a, "secado.zonas")) || 0;
+  const integrar = ["si", "despues"].includes(get(a, "datos.integrar"));
+  const piloto = {
+    fermentacion: { t: "Piloto de fermentación", d: `${nPil ? nPil + " canecas" : "Un grupo de canecas"} con sondas en ${lugar}, ${cuando}.` },
+    secado: { t: "Piloto de secado", d: `Monitoreo de ${zonas ? zonas + (zonas === 1 ? " zona" : " zonas") : "una zona"} de secado ${cuando}.` },
+    datos: { t: "Datos en orden", d: "Un registro digital de lotes, listo para recibir las mediciones." }
+  };
+  const ampl = {
+    fermentacion: { t: "Fermentación", d: `${nTot ? "Hasta " + nTot + " canecas" : "Más canecas"}${["fincas", "ambos"].includes(donde) ? (nSit ? `, en ${nSit} sitios` : ", incluidas fincas de socios") : ""}.` },
+    secado: { t: "Secado", d: `Monitoreo de ${zonas ? zonas + (zonas === 1 ? " zona" : " zonas") : "las zonas"} de secado priorizadas.` },
+    datos: { t: "Conexión de datos", d: integrar ? "Fermentación y secado conectados con su laboratorio y su trazabilidad." : "Tablero de lotes con fermentación, secado y resultados de catación." }
+  };
+  const fases = [{ n: "Fase 1", ...piloto[prio[0]] }];
+  prio.slice(1).forEach((k, i) => fases.push({ n: "Fase " + (i + 2), ...ampl[k] }));
+  const cap = parseInt(get(a, "plan.capacitar")) || 0;
+  fases.push({ n: "En cada fase", t: "Capacitación", d: `${cap ? "Para " + cap + (cap === 1 ? " persona" : " personas") : "Para el equipo que opere el sistema"}, en el sitio y con el material de consulta.` });
+  return fases;
+}
+</script>
+
+<style>
+:root{
+  --primary:#116AAB; --primary-hover:#0E5A91; --primary-light:#E5ECF4;
+  --caption:#1C4767; --un-blue:#5792C9; --orange:#F58320; --peach:#FFC48F;
+  --gray-dark:#545454; --gray-medium:#767676; --gray-light:#F2F2F2;
+  --white-fao:#F7F8F9; --white:#FFFFFF; --line:#CFDDEB;
+  --font:"Open Sans","Helvetica Neue",Helvetica,Arial,sans-serif;
+  color-scheme:light;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;scroll-padding-top:72px}
+body{background:var(--white);font-family:var(--font);color:var(--gray-dark);font-size:15px;line-height:1.55}
+img{max-width:100%}
+button,input,textarea,select{font-family:inherit;font-size:inherit;color:inherit}
+:focus-visible{outline:2px solid var(--orange);outline-offset:2px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+
+/* ---------- Encabezado institucional ---------- */
+.topbar{position:sticky;top:0;z-index:20;height:56px;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:0 48px;border-bottom:1px solid var(--gray-light);background:var(--white)}
+.logo{height:34px;width:auto;display:block}
+.logo-fallback{font-weight:800;color:var(--caption);font-size:18px}
+.section-name{font-size:13px;font-weight:600;color:var(--gray-medium);text-align:right}
+.section-name b{color:var(--primary);font-weight:700}
+
+/* ---------- Tipografía ---------- */
+.eyebrow{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;color:var(--orange)}
+h1{font-size:34px;line-height:1.18;font-weight:700;color:var(--caption);margin-top:6px}
+h2{font-size:18px;line-height:1.25;font-weight:700;color:var(--primary)}
+h3{font-size:15px;line-height:1.3;font-weight:700;color:var(--caption)}
+.lede{font-size:16px;line-height:1.55;margin-top:10px;max-width:680px}
+.small{font-size:12.5px;line-height:1.5;color:var(--gray-medium)}
+
+/* ---------- Portada ---------- */
+.cover-hero{position:relative;min-height:420px;display:flex;align-items:flex-end;background:#3c6f96 center/cover no-repeat}
+.cover-overlay{position:absolute;inset:0;background:linear-gradient(90deg,rgba(28,71,103,.94) 0%,rgba(28,71,103,.8) 48%,rgba(28,71,103,.2) 85%)}
+.cover-text{position:relative;padding:56px 48px 44px;max-width:780px;color:#fff}
+.cover-text .eyebrow{color:var(--peach)}
+.cover-text h1{color:#fff;font-size:46px;line-height:1.1;margin-top:12px;font-weight:800}
+.cover-text p{font-size:17px;line-height:1.5;margin-top:16px;color:var(--primary-light);max-width:600px}
+.trust{display:flex;gap:12px;align-items:flex-start;margin-top:22px;max-width:600px;padding:12px 14px;background:rgba(255,255,255,.1);border-left:3px solid var(--peach)}
+.trust p{margin:0;font-size:14px;color:#fff}
+
+.cover-band{display:grid;grid-template-columns:220px 1fr 1fr 1fr;padding:30px 48px 34px;border-bottom:1px solid var(--gray-light)}
+.stat{padding-right:28px;border-right:1px solid var(--gray-light)}
+.stat .n{font-size:58px;font-weight:800;color:var(--primary);line-height:1}
+.stat .n small{font-size:22px;font-weight:700;margin-left:4px}
+.stat .l{font-size:13.5px;line-height:1.45;margin-top:8px}
+.comp{padding:0 26px;border-right:1px solid var(--gray-light);position:relative;isolation:isolate;min-height:150px}
+.comp:last-child{border-right:0;padding-right:0}
+.comp .wm{position:absolute;top:58px;right:20px;width:92px;height:92px;border-radius:50%;background:var(--white);border:4px solid var(--primary);display:flex;align-items:center;justify-content:center;z-index:-1;pointer-events:none}
+.comp:last-child .wm{right:-6px}
+.comp .wm svg{width:48px;height:48px}
+.comp .when,.comp h2,.comp p{text-shadow:0 0 3px #fff,0 0 3px #fff,0 0 6px #fff,0 0 8px #fff}
+.comp .when{font-size:12px;font-weight:700;color:var(--gray-medium);text-transform:uppercase;letter-spacing:.06em}
+.comp h2{margin-top:6px}
+.comp p{font-size:13.5px;margin-top:6px;padding-right:104px}
+
+/* ---------- Línea de pasos ---------- */
+.steps-wrap{padding:30px 48px 0;overflow-x:auto}
+.timeline{position:relative;display:grid;grid-template-columns:repeat(7,1fr);min-width:760px;list-style:none}
+.timeline::before{content:"";position:absolute;left:8px;right:8px;top:9px;height:2px;background:var(--primary-light)}
+.step-btn{all:unset;cursor:pointer;display:block;position:relative;padding-right:14px}
+.step-btn .dot{width:20px;height:20px;border-radius:50%;background:var(--white);border:3px solid var(--line);position:relative;z-index:1;transition:border-color .2s,background .2s}
+.step-btn .t{display:block;font-size:12px;font-weight:700;color:var(--gray-medium);margin-top:10px;text-transform:uppercase;letter-spacing:.05em}
+.step-btn .nm{display:block;font-size:14px;font-weight:700;color:var(--gray-medium);margin-top:2px;line-height:1.3}
+.step-btn.done .dot{border-color:var(--primary);background:var(--primary)}
+.step-btn.done .nm{color:var(--caption)}
+.step-btn.current .dot{border-color:var(--orange)}
+.step-btn.current .nm{color:var(--caption)}
+.step-btn:focus-visible .dot{outline:2px solid var(--orange);outline-offset:3px}
+
+/* ---------- Paso ---------- */
+main{padding:28px 48px 48px}
+.step-grid{display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:40px;align-items:start}
+.why-inline{position:static!important}
+.why{background:var(--white-fao);border-top:3px solid var(--orange);padding:14px 16px 12px;position:sticky;top:76px}
+.why h3{margin-bottom:6px}
+.why p{font-size:13.5px;line-height:1.5}
+.why p + p{margin-top:8px}
+.fields{margin-top:22px;display:grid;grid-template-columns:1fr 1fr;gap:26px 24px}
+.field{grid-column:1 / -1;border:0;min-width:0}
+.field.half{grid-column:auto}
+.field[hidden]{display:none}
+.field > legend,.field > label.q{display:block;font-size:15px;font-weight:700;color:var(--caption);line-height:1.35;margin-bottom:4px;padding:0}
+.req{color:var(--orange);font-weight:700}
+.help{font-size:12.5px;line-height:1.5;color:var(--gray-medium);margin-bottom:10px;max-width:640px}
+.err{display:none;font-size:13px;font-weight:600;color:#B4570A;margin-top:8px}
+.field.invalid .err{display:block}
+
+input[type=text],input[type=number],textarea{width:100%;border:1px solid var(--line);background:var(--white);padding:10px 12px;border-radius:3px;font-size:15px;line-height:1.4;transition:border-color .15s}
+textarea{min-height:92px;resize:vertical}
+input:focus,textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px var(--primary-light)}
+.with-unit{display:flex;align-items:center;gap:10px}
+.with-unit input{max-width:160px}
+.with-unit span{font-size:13.5px;color:var(--gray-medium)}
+
+/* Opciones (radio / checkbox) */
+.opts{display:grid;grid-template-columns:repeat(auto-fill,minmax(210px,1fr));gap:8px}
+.opt{position:relative;display:flex;gap:10px;align-items:flex-start;padding:10px 12px;border:1px solid var(--line);background:var(--white);border-radius:3px;cursor:pointer;font-size:14px;line-height:1.4;transition:background .15s,border-color .15s}
+.opt input{position:absolute;opacity:0;pointer-events:none}
+.opt .mk{flex:none;width:16px;height:16px;margin-top:1px;border:2px solid var(--line);background:var(--white);transition:all .15s}
+.opt.radio .mk{border-radius:50%}
+.opt:hover{border-color:var(--un-blue)}
+.opt.on{background:var(--primary-light);border-color:var(--primary);color:var(--caption);font-weight:600}
+.opt.on .mk{border-color:var(--primary);background:var(--primary)}
+.opt.radio.on .mk{background:var(--white);border:5px solid var(--primary)}
+.opt.off{opacity:.45;cursor:not-allowed}
+.opt:has(input:focus-visible){outline:2px solid var(--orange);outline-offset:2px}
+
+/* Chips de variedades */
+.chip-group + .chip-group{margin-top:12px}
+.chip-group h4{font-size:12px;font-weight:700;color:var(--gray-medium);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{position:relative;font-size:13px;font-weight:700;color:var(--primary);background:var(--white);border:1px solid var(--line);padding:6px 12px;border-radius:3px;cursor:pointer;transition:all .15s}
+.chip input{position:absolute;opacity:0;pointer-events:none}
+.chip.on{background:var(--primary-light);border-color:var(--primary)}
+.chip:has(input:focus-visible){outline:2px solid var(--orange);outline-offset:2px}
+.other-input{margin-top:10px;max-width:420px}
+
+/* Orden de prioridad */
+.rank{list-style:none;display:grid;gap:8px;max-width:560px}
+.rank li{display:grid;grid-template-columns:34px 1fr auto;gap:12px;align-items:center;padding:10px 12px;background:var(--white-fao);border-top:3px solid var(--primary)}
+.rank li:first-child{border-top-color:var(--orange)}
+.rank .pos{font-size:22px;font-weight:800;color:var(--primary);line-height:1}
+.rank li:first-child .pos{color:var(--orange)}
+.rank .lbl{font-size:14px;color:var(--caption);font-weight:600}
+.rank .mv{display:flex;gap:4px}
+.rank button{width:32px;height:32px;border:1px solid var(--line);background:var(--white);border-radius:3px;color:var(--primary);font-weight:700;cursor:pointer}
+.rank button:disabled{opacity:.35;cursor:default}
+
+/* Porcentajes */
+.pct{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;max-width:640px}
+.pct label{font-size:13px;font-weight:600;color:var(--caption);display:block;margin-bottom:4px}
+.pct .box{display:flex;align-items:center;gap:6px}
+.pct input{text-align:right}
+.pct .box span{font-weight:700;color:var(--gray-medium)}
+.bar{display:flex;height:10px;background:var(--gray-light);margin-top:12px;max-width:640px;overflow:hidden}
+.bar i{display:block;height:100%;transition:width .2s}
+.sum{font-size:13px;font-weight:700;margin-top:6px;color:var(--gray-medium)}
+.sum.ok{color:var(--primary)} .sum.warn{color:#B4570A}
+
+/* Matriz de control */
+.def{background:var(--caption);color:#fff;padding:16px 20px;display:grid;grid-template-columns:1fr 1fr;gap:18px}
+.def b{display:inline-block;font-size:15px;padding-bottom:2px;border-bottom:3px solid var(--peach);margin-bottom:4px}
+.def .is-ctrl b{border-color:var(--orange)}
+.def p{font-size:13.5px;line-height:1.45;color:#D4DEE8}
+.def .full{grid-column:1 / -1;font-size:13px;color:#fff;font-weight:600;border-top:1px solid rgba(255,255,255,.22);padding-top:10px}
+.mx{border-top:1px solid var(--gray-light)}
+.mx-row{display:grid;grid-template-columns:200px repeat(4,1fr);border-bottom:1px solid var(--gray-light)}
+.mx-row.head{font-size:12px;font-weight:700;color:var(--gray-medium);line-height:1.35}
+.mx-row.head > div{padding:10px 8px}
+.mx-row .rl{padding:12px 8px;font-size:14px;font-weight:700;color:var(--caption);align-self:center}
+.mx-cell{display:flex;align-items:center;justify-content:center;padding:6px;cursor:pointer;position:relative}
+.mx-cell input{position:absolute;opacity:0;pointer-events:none}
+.mx-cell .mk{width:20px;height:20px;border-radius:50%;border:2px solid var(--line);background:var(--white);transition:all .15s}
+.mx-cell:hover .mk{border-color:var(--un-blue)}
+.mx-cell.on .mk{border:6px solid var(--primary)}
+.mx-cell .ml{display:none}
+.mx-cell:has(input:focus-visible) .mk{outline:2px solid var(--orange);outline-offset:2px}
+
+/* Fotos */
+.photo-slots{display:grid;gap:12px}
+.slot{display:grid;grid-template-columns:1fr auto;gap:10px 16px;align-items:center;padding:12px 14px;border:1px solid var(--line);background:var(--white-fao)}
+.slot p{font-size:14px;color:var(--caption);font-weight:600}
+.slot .btn-sec{padding:8px 14px;font-size:13px}
+.thumbs{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:8px}
+.thumbs:empty{display:none}
+.thumb{position:relative;width:88px;height:88px;background:var(--gray-light) center/cover}
+.thumb button{position:absolute;top:4px;right:4px;width:24px;height:24px;border:0;border-radius:50%;background:rgba(28,71,103,.85);color:#fff;font-weight:700;cursor:pointer;line-height:24px}
+.photo-count{font-size:12.5px;color:var(--gray-medium);margin-top:8px}
+
+/* Consentimiento */
+.consent{display:flex;gap:12px;align-items:flex-start;padding:14px 16px;background:var(--white-fao);border-top:3px solid var(--primary);cursor:pointer}
+.consent input{width:18px;height:18px;margin-top:2px;accent-color:var(--primary);flex:none}
+.consent span{font-size:13.5px;line-height:1.5}
+
+/* Navegación del formulario */
+.nav{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:34px;padding-top:20px;border-top:1px solid var(--gray-light)}
+.btn{font-weight:700;font-size:14.5px;border:0;border-radius:3px;padding:12px 22px;cursor:pointer;background:var(--primary);color:#fff;transition:background .15s}
+.btn:hover{background:var(--primary-hover)}
+.btn:disabled{opacity:.6;cursor:progress}
+.btn-sec{font-weight:700;font-size:14.5px;border:1px solid var(--primary);border-radius:3px;padding:11px 20px;cursor:pointer;background:var(--white);color:var(--primary)}
+.btn-sec:hover{background:var(--primary-light)}
+.saved{font-size:12.5px;color:var(--gray-medium)}
+.status{margin-top:16px;padding:12px 14px;font-size:14px;border-left:3px solid var(--orange);background:#FDEBDA;color:#7a3b06;display:none}
+.status.show{display:block}
+.status .btn-sec{margin-top:10px;font-size:13px;padding:8px 14px}
+.hp{position:absolute;left:-9999px;width:1px;height:1px;overflow:hidden}
+
+/* ---------- Resultado ---------- */
+.done-grid{display:grid;grid-template-columns:1fr 440px;gap:40px;margin-top:24px;align-items:start}
+.summary{display:grid;grid-template-columns:1fr 1fr;gap:18px 26px}
+.summary div{border-top:3px solid var(--primary-light);padding-top:12px}
+.summary h3{color:var(--primary)}
+.summary p{font-size:13.5px;margin-top:5px}
+.photos-todo{margin-top:30px}
+.photos-todo h2{margin-bottom:10px}
+.photos-todo ul{list-style:none;display:grid;gap:8px}
+.photos-todo li{font-size:14px;line-height:1.45;padding-left:16px;position:relative}
+.photos-todo li::before{content:"";position:absolute;left:0;top:7px;width:6px;height:6px;background:var(--primary)}
+.photos-todo .small{margin-top:10px}
+.next{background:var(--primary);color:#fff;padding:24px 26px 0;display:flex;flex-direction:column}
+.next h2{color:#fff;font-size:20px}
+.next .sub{font-size:13.5px;color:var(--primary-light);margin-top:6px}
+.next ol{list-style:none;counter-reset:s;margin-top:14px}
+.next li{counter-increment:s;display:grid;grid-template-columns:34px 1fr;gap:6px;padding:10px 0;border-top:1px solid rgba(255,255,255,.22);font-size:13.5px;line-height:1.45}
+.next li:first-child{border-top:0}
+.next li::before{content:counter(s);font-size:22px;font-weight:800;line-height:1;color:var(--peach)}
+.next li b{display:block;font-size:14px}
+.next li span{color:#D4DEE8}
+.next .ask{margin:14px -26px 0;font-size:15px;font-weight:700;background:var(--caption);padding:16px 26px}
+
+/* ---------- Pie ---------- */
+.closing{background:var(--caption);color:#D4DEE8;padding:26px 48px;display:flex;align-items:center;justify-content:space-between;gap:24px;font-size:12.5px}
+.closing img{height:56px;width:auto;display:block}
+.closing p{max-width:520px;text-align:right}
+
+/* ---------- Animación de cambio de paso ---------- */
+.step-panel{animation:in .28s ease-out}
+@keyframes in{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}html{scroll-behavior:auto}}
+
+/* ---------- Responsive ---------- */
+@media (max-width:1000px){
+  .cover-band{grid-template-columns:1fr 1fr;gap:26px 0}
+  .stat{grid-column:1 / -1;border-right:0;padding-bottom:18px;border-bottom:1px solid var(--gray-light)}
+  .comp:nth-child(3){border-right:0}
+  .comp:last-child{grid-column:1 / -1;padding-left:0;padding-top:20px;border-top:1px solid var(--gray-light)}
+  .step-grid,.done-grid{grid-template-columns:1fr}
+  aside.why{display:none}
+  .why-inline{display:block!important;margin-top:16px}
+}
+@media (max-width:720px){
+  .topbar{padding:0 18px}
+  .section-name .long{display:none}
+  .cover-hero{min-height:0}
+  .cover-text{padding:40px 20px 28px}
+  .cover-text h1{font-size:32px}
+  .cover-text p{font-size:15.5px}
+  .cover-band{grid-template-columns:1fr;padding:24px 20px}
+  .comp{padding:18px 0 0!important;border-right:0!important;border-top:1px solid var(--gray-light);min-height:0}
+  .comp .wm{width:64px;height:64px;top:18px;right:0!important;border-width:3px}
+  .comp .wm svg{width:34px;height:34px}
+  .comp p{padding-right:80px}
+  .steps-wrap{padding:22px 20px 0}
+  .timeline{min-width:560px}
+  .step-btn .nm{font-size:12.5px}
+  main{padding:22px 20px 40px}
+  h1{font-size:27px}
+  .fields{grid-template-columns:1fr}
+  .def{grid-template-columns:1fr}
+  .mx-row.head{display:none}
+  .mx-row{grid-template-columns:1fr;padding:6px 0 10px}
+  .mx-row .rl{padding:8px 0 6px}
+  .mx-cell{justify-content:flex-start;gap:10px;padding:6px 0}
+  .mx-cell .ml{display:inline;font-size:14px}
+  .pct{grid-template-columns:1fr 1fr}
+  .summary{grid-template-columns:1fr}
+  .closing{flex-direction:column;align-items:flex-start;padding:24px 20px}
+  .closing p{text-align:left}
+  .nav{flex-wrap:wrap}
+}
+
+/* ---------- Ruta preliminar ---------- */
+.phases{list-style:none;margin-top:14px;display:grid;gap:10px}
+.phases li{display:grid;grid-template-columns:110px 1fr;gap:14px;padding:12px 14px;background:var(--white-fao);border-top:3px solid var(--primary)}
+.phases li.first{border-top-color:var(--orange)}
+.phases .pn{font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--gray-medium);padding-top:2px}
+.phases li.first .pn{color:var(--orange)}
+.phases b{display:block;color:var(--caption);font-size:15px}
+.phases li span:not(.pn){font-size:13.5px}
+.consent a{color:var(--primary);font-weight:700}
+@media (max-width:720px){.phases li{grid-template-columns:1fr;gap:4px}}
+
+@media print{
+  .topbar,.steps-wrap,.nav,.closing{display:none}
+}
+</style>
+</head>
+<body>
+
+<header class="topbar">
+  <a href="#inicio" aria-label="Tunjo Smart Solutions, ir al inicio"><img class="logo" id="logoTop" alt="Tunjo Smart Solutions"></a>
+  <div class="section-name" id="sectionName"><span class="long">Diagnóstico de fermentación y secado · </span><b>Inicio</b></div>
+</header>
+
+<section class="cover-hero" id="inicio">
+  <div class="cover-overlay"></div>
+  <div class="cover-text">
+    <div class="eyebrow">Diagnóstico para <span data-lead-name></span></div>
+    <h1>Planeemos juntos el monitoreo de sus fermentaciones</h1>
+    <p>Con sus respuestas preparamos una ruta de ejecución a la medida de la cooperativa: dónde empezar, qué instalar y a quién capacitar. Si no conoce un dato, marque “No sé” y continúe.</p>
+    <div class="trust"><p>Sus respuestas quedan protegidas por nuestra <a href="" data-policy-link target="_blank" rel="noopener" style="color:#fff;font-weight:700">Política de uso de datos</a>: un compromiso de confidencialidad de Tunjo con la cooperativa.</p></div>
+  </div>
+</section>
+
+<section class="cover-band" aria-label="Qué cubre el diagnóstico">
+  <div class="stat">
+    <div class="n">15<small>min</small></div>
+    <div class="l">para responder. Sus respuestas se guardan en este navegador mientras avanza.</div>
+  </div>
+  <div class="comp">
+    <div class="wm" aria-hidden="true">
+      <svg viewBox="0 0 48 48" fill="none" stroke="#116AAB" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><path d="M12 14h24l-2 26a3 3 0 0 1-3 3H17a3 3 0 0 1-3-3z"/><path d="M10 14h28"/><path d="M24 14V9a3 3 0 0 1 3-3h2"/><path d="M15 26h18"/></svg>
+    </div>
+    <div class="when">En las canecas</div>
+    <h2>Fermentación</h2>
+    <p>Medir, registrar y controlar dentro de sus canecas con airlock, sin romper el sello.</p>
+  </div>
+  <div class="comp">
+    <div class="wm" aria-hidden="true">
+      <svg viewBox="0 0 48 48" fill="none" stroke="#116AAB" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="24" cy="16" r="6"/><path d="M24 4v2M36 16h2M10 16h2M32.5 7.5l-1.4 1.4M15.5 7.5l1.4 1.4"/><path d="M8 30h32M8 37h32"/><path d="M14 30v7M24 30v7M34 30v7"/></svg>
+    </div>
+    <div class="when">En el beneficio</div>
+    <h2>Secado</h2>
+    <p>Seguir humedad y temperatura en patios, camas y secadoras.</p>
+  </div>
+  <div class="comp">
+    <div class="wm" aria-hidden="true">
+      <svg viewBox="0 0 48 48" fill="none" stroke="#116AAB" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="12" height="12" rx="3"/><rect x="28" y="8" width="12" height="12" rx="3"/><rect x="18" y="28" width="12" height="12" rx="3"/><path d="M14 20v4h20v-4M24 24v4"/></svg>
+    </div>
+    <div class="when">Lo que ya tienen</div>
+    <h2>Datos</h2>
+    <p>Conectar laboratorio, catación y trazabilidad con lo que pasa en cada lote.</p>
+  </div>
+</section>
+<nav class="steps-wrap" aria-label="Pasos del diagnóstico">
+  <ol class="timeline" id="timeline"></ol>
+</nav>
+
+<main id="form-top">
+  <div id="panel"></div>
+</main>
+
+<footer class="closing">
+  <img id="logoWhite" alt="Tunjo Smart Solutions">
+  <p>Tunjo Smart Solutions usa estas respuestas solo para preparar el plan de la cooperativa, según nuestra <a href="" data-policy-link target="_blank" rel="noopener" style="color:#fff">Política de uso de datos</a>.</p>
+</footer>
+
+<script>
+/* =========================================================
+   CONTENIDO DEL FORMULARIO
+   ========================================================= */
+const NOSE = ["nose", "No sé"];
+
+const STEPS = [
+  {
+    id: "cooperativa", name: "La cooperativa",
+    title: "Dónde y con quién fermentan",
+    lede: "Empecemos por el tamaño y la forma del proyecto.",
+    why: ["Si las canecas están en un solo lugar o repartidas en fincas cambia por completo el plan: cuántos equipos, cuánta logística y cuánta capacitación.",
+          "El orden de prioridades define con qué empezamos el piloto."],
+    fields: [
+      { type: "text", path: "cooperativa.nombre", label: "¿Quién responde?", placeholder: "Su nombre", required: true, half: true },
+      { type: "text", path: "cooperativa.cargo", label: "Cargo en la cooperativa", placeholder: "Ej. jefe de beneficio, catador", half: true },
+      { type: "radio", path: "cooperativa.donde", label: "¿Dónde están hoy las canecas de fermentación?", required: true,
+        options: [["central", "En el beneficio central de la cooperativa"], ["fincas", "En fincas de socios"], ["ambos", "En ambos"]] },
+      { type: "number", path: "cooperativa.sitios", label: "¿En cuántos sitios distintos fermentan?", unit: "sitios", half: true, when: "cooperativa.donde:fincas|ambos" },
+      { type: "radio", path: "cooperativa.distancia", label: "¿A qué distancia del beneficio central están esas fincas?", when: "cooperativa.donde:fincas|ambos",
+        options: [["lt30", "Menos de 30 min"], ["30_60", "30 a 60 min"], ["1_2h", "1 a 2 horas"], ["gt2h", "Más de 2 horas"], ["varia", "Varía mucho"]] },
+      { type: "number", path: "cooperativa.productores", label: "¿Cuántos productores participan en lotes fermentados o especiales?", unit: "productores", half: true },
+      { type: "rank", path: "cooperativa.prioridad", label: "Ordene por dónde quiere empezar",
+        help: "Use las flechas. Arriba va lo más urgente.",
+        items: [["fermentacion", "Fermentación: medir y controlar en las canecas"], ["secado", "Secado: monitorear y automatizar"], ["datos", "Datos: conectar laboratorio, catación y trazabilidad"]] },
+      { type: "radio", path: "cooperativa.cert_limita", label: "¿Alguna de sus certificaciones limita insumos o materiales en contacto con el café?",
+        options: [["insumos", "Sí, insumos (aditivos, cultivos, azúcares)"], ["materiales", "Sí, materiales (sondas, superficies)"], ["ambos", "Sí, ambos"], ["no", "No"], NOSE] }
+    ]
+  },
+  {
+    id: "fermentadores", name: "Fermentadores",
+    title: "Sus canecas con airlock",
+    lede: "Cantidades aproximadas están bien.",
+    why: ["El número de canecas que fermentan al mismo tiempo en el pico de cosecha define cuántas sondas se necesitan.",
+          "Si la tapa admite una segunda perforación, la sonda entra con un empaque y el airlock sigue funcionando igual."],
+    fields: [
+      { type: "number", path: "fermentadores.canecas", label: "Canecas de fermentación en total", unit: "canecas", half: true },
+      { type: "number", path: "fermentadores.simultaneas", label: "En el pico de cosecha, ¿cuántas fermentan al mismo tiempo?", unit: "canecas", half: true },
+      { type: "checks", path: "fermentadores.volumen", label: "¿De qué tamaño son?",
+        options: [["20", "Unos 20 L"], ["60", "Unos 60 L"], ["120", "Unos 120 L"], ["200", "Unos 200 L"], ["otro", "Otro tamaño"]] },
+      { type: "number", path: "fermentadores.carga_kg", label: "Café por caneca", unit: "kg aprox.", half: true },
+      { type: "radio", path: "fermentadores.material", label: "¿De qué plástico son?",
+        options: [["alimenticio", "Plástico de grado alimenticio"], ["plastico", "Plástico, no sé si de grado alimenticio"], ["otro", "Otro material"]] },
+      { type: "radio", path: "fermentadores.airlock", label: "¿Dónde va el airlock?",
+        options: [["tapa", "En la tapa"], ["costado", "En el costado"], ["otro", "En otro lugar"], NOSE] },
+      { type: "radio", path: "fermentadores.perforar", label: "¿Se podría hacer una segunda perforación en la tapa para una sonda, sellada con empaque?",
+        options: [["si", "Sí"], ["no", "No"], ["depende", "Depende de la caneca"], NOSE] },
+      { type: "checks", path: "fermentadores.estado_entrada", label: "¿En qué estado entra el café a la caneca?",
+        options: [["cereza", "Cereza entera"], ["despulpado", "Despulpado, con mucílago"], ["otro", "Otro"]] },
+      { type: "checks", path: "fermentadores.procesos", label: "¿Qué procesos hacen en canecas?",
+        options: [["natural_anaerobico", "Natural anaeróbico"], ["honey_anaerobico", "Honey anaeróbico"], ["lavado_anaerobico", "Lavado anaeróbico"], ["maceracion", "Maceración carbónica"], ["cultivos", "Con levaduras u otros cultivos"], ["otro", "Otro"]] },
+      { type: "number", path: "fermentadores.lotes_temporada", label: "Lotes fermentados en canecas por temporada", unit: "lotes", half: true },
+      { type: "radio", path: "fermentadores.duracion", label: "¿Cuánto dura una fermentación típica?",
+        options: [["lt48", "Menos de 48 h"], ["48_96", "48 a 96 h"], ["96_144", "96 a 144 h"], ["gt144", "Más de 144 h"], ["varia", "Varía mucho"]] },
+      { type: "chips", path: "fermentadores.variedades", label: "¿Qué variedades fermentan en canecas?",
+        help: "Marque todas las que apliquen.",
+        groups: [
+          ["Hondureñas y resistentes", [["lempira", "Lempira"], ["ihcafe90", "IHCAFE 90"], ["parainema", "Parainema"], ["obata", "Obatá"], ["catimor", "Catimor"]]],
+          ["Tradicionales", [["catuai", "Catuaí"], ["caturra", "Caturra"], ["pacas", "Pacas"], ["bourbon", "Bourbon"], ["icatu", "Icatu"]]],
+          ["Alto valor", [["geisha", "Geisha"], ["pacamara", "Pacamara"]]],
+          ["", [["otra", "Otra"], ["nose", "No sé"]]]
+        ] },
+      { type: "checks", path: "fermentadores.inoculo", label: "¿Usan algún inóculo?", exclusive: "espontanea,nose",
+        help: "Marque todas las que apliquen.",
+        options: [["espontanea", "No, fermentación espontánea"], ["mosto", "Sí, mosto de un lote anterior"], ["comercial", "Sí, un cultivo comercial"], NOSE] },
+      { type: "checks", path: "fermentadores.inoculo_tipo", label: "¿De qué tipo?", when: "fermentadores.inoculo:comercial",
+        options: [["levaduras", "Levaduras"], ["koji", "Koji"], ["lacticas", "Bacterias lácticas"], ["otro", "Otro"]] },
+      { type: "checks", path: "fermentadores.sustratos", label: "¿Agregan algún sustrato?", exclusive: "ninguno",
+        options: [["fruta", "Fruta"], ["mosto_otras", "Mosto de otras fermentaciones"], ["azucar", "Azúcar o panela"], ["miel", "Miel o mucílago"], ["otro", "Otro"], ["ninguno", "Ninguno"]] }
+    ]
+  },
+  {
+    id: "medicion", name: "Medición y control",
+    title: "Qué miden y qué controlan",
+    lede: "Cómo siguen hoy la fermentación y qué les gustaría ver.",
+    why: ["Si ya tienen equipos de medición, el plan puede aprovecharlos.",
+          "Lo que hoy se ajusta a mano o con una regla fija es lo primero que se puede automatizar."],
+    fields: [
+      { type: "radio", path: "medicion.mide", label: "¿Hoy miden algo dentro de las canecas?", options: [["si", "Sí"], ["no", "No"]] },
+      { type: "radio", path: "medicion.modo", label: "¿Cómo lo miden?", when: "medicion.mide:si",
+        options: [["sumergido", "Con un sensor dentro de la caneca"], ["muestra", "Sacando una muestra"], ["ambos", "De las dos formas"]] },
+      { type: "checks", path: "medicion.variables", label: "¿Qué variables miden?", when: "medicion.mide:si",
+        options: [["temperatura", "Temperatura"], ["ph", "pH"], ["brix", "°Brix"], ["o2", "Oxígeno disuelto"], ["otro", "Otra"]] },
+      { type: "text", path: "medicion.equipo", label: "¿Qué equipos usan?", placeholder: "Marca y modelo, si los conoce", when: "medicion.mide:si" },
+      { type: "checks", path: "medicion.desea", label: "¿Qué le gustaría poder medir en las canecas?", exclusive: "recomendacion",
+        options: [["temperatura", "Temperatura"], ["ph", "pH"], ["brix", "°Brix / sólidos solubles"], ["o2", "Oxígeno disuelto"], ["orp", "Potencial redox (ORP)"], ["gas", "Gas: presión o salida por el airlock"], ["conductividad", "Conductividad"], ["otro", "Otra"], ["recomendacion", "No sé, quiero una recomendación"]] },
+      { type: "def" },
+      { type: "matrix", path: "medicion.control", label: "Para cada variable, ¿cómo se controla hoy?",
+        rows: [["temperatura", "Temperatura"], ["ph", "pH"], ["gas", "Gas (salida por el airlock)"], ["agitacion", "Agitación o volteo"]],
+        cols: [["no", "No se controla"], ["manual", "A mano, cuando alguien lo nota"], ["regla", "Con una regla fija (horario, tiempo)"], ["auto", "Solo, con un equipo"]] },
+      { type: "checks", path: "medicion.fin", label: "¿Cómo deciden cuándo termina la fermentación?",
+        options: [["tiempo", "Por tiempo"], ["ph", "Por pH"], ["brix", "Por °Brix"], ["sensorial", "Por olor o sabor"], ["airlock", "Cuando el airlock deja de burbujear"], ["otro", "Otro"]] },
+      { type: "radio", path: "medicion.objetivo", label: "¿Buscan un objetivo de taza con el control?",
+        options: [["puntaje", "Sí, un puntaje objetivo"], ["perfil", "Sí, un perfil sensorial"], ["ambos", "Ambos"], ["no_definido", "Aún no está definido"]] },
+      { type: "radio", path: "medicion.catacion", label: "¿Registran la catación de cada lote fermentado?",
+        options: [["puntaje", "Sí, con puntaje"], ["descriptores", "Sí, solo descriptores"], ["no", "No por lote"], NOSE] }
+    ]
+  },
+  {
+    id: "secado", name: "Secado",
+    title: "Cómo secan",
+    lede: "Del beneficio al café listo para almacenar.",
+    why: ["El número de zonas de secado a monitorear es otro de los factores que dimensionan el proyecto.",
+          "Los problemas frecuentes nos dicen qué conviene vigilar primero."],
+    fields: [
+      { type: "percent", path: "secado.beneficio", label: "¿Qué porcentaje del café que procesa la cooperativa es…?",
+        help: "Aproximado. La suma debería dar 100 %.",
+        items: [["lavado", "Lavado"], ["honey", "Honey"], ["natural", "Natural"], ["anaerobico", "Anaeróbico o experimental"]] },
+      { type: "checks", path: "secado.metodo", label: "¿Cómo secan?",
+        options: [["patio", "Patios al sol"], ["camas", "Camas elevadas"], ["solar", "Secadores solares o marquesinas"], ["mecanica", "Secadoras mecánicas (guardiolas, silos)"], ["otro", "Otro"]] },
+      { type: "number", path: "secado.zonas", label: "¿Cuántas zonas o equipos de secado le gustaría monitorear?", unit: "zonas", half: true },
+      { type: "radio", path: "secado.humedad", label: "¿Cómo saben que el café está seco?",
+        options: [["medidor", "Con medidor de humedad"], ["experiencia", "Por experiencia"], ["tiempo", "Por tiempo"], NOSE] },
+      { type: "checks", path: "secado.problemas", label: "¿Qué problemas aparecen con frecuencia?", exclusive: "ninguno",
+        options: [["disparejo", "Secado disparejo"], ["sobresecado", "Sobresecado"], ["lluvia", "Rehumedecimiento por lluvia"], ["moho", "Moho o fermentación no deseada"], ["espacio", "Falta de espacio en pico de cosecha"], ["otro", "Otro"], ["ninguno", "Ninguno"]] }
+    ]
+  },
+  {
+    id: "datos", name: "Datos y sitios",
+    title: "Sus sistemas y su infraestructura",
+    lede: "Lo que ya registran y con qué contamos en cada sitio.",
+    why: ["Si la cooperativa ya tiene laboratorio y trazabilidad, el plan conecta las mediciones con esos sistemas en vez de crear otros.",
+          "Energía e internet definen si los equipos envían datos en vivo o los guardan y los envían después."],
+    fields: [
+      { type: "checks", path: "datos.registros", label: "¿Dónde registran hoy los lotes?", exclusive: "nada",
+        options: [["papel", "En papel o bitácora"], ["hoja", "En hojas de cálculo"], ["laboratorio", "En el sistema del laboratorio"], ["trazabilidad", "En una plataforma de trazabilidad"], ["software", "En otro software"], ["nada", "No se registran"]] },
+      { type: "text", path: "datos.sistemas", label: "¿Cómo se llaman esos sistemas?", placeholder: "Si lo sabe", when: "datos.registros:laboratorio|trazabilidad|software" },
+      { type: "radio", path: "datos.integrar", label: "¿Le gustaría que las mediciones se conecten con esos sistemas?", when: "datos.registros:hoja|laboratorio|trazabilidad|software",
+        options: [["si", "Sí, desde el inicio"], ["despues", "Más adelante"], ["no", "No es necesario"], NOSE] },
+      { type: "radio", path: "sitio.energia", label: "¿Hay energía eléctrica estable donde están las canecas del beneficio central?", when: "cooperativa.donde:central|ambos",
+        options: [["estable", "Sí, estable"], ["cortes", "Sí, con cortes"], ["solar", "Solar o planta"], ["no", "No hay cerca"], NOSE] },
+      { type: "radio", path: "sitio.internet_central", label: "¿Qué internet hay en el beneficio central?", when: "cooperativa.donde:central|ambos",
+        options: [["fijo", "Internet fijo o WiFi estable"], ["celular", "Buena señal celular"], ["debil", "Señal débil"], ["ninguno", "Ninguno"], NOSE] },
+      { type: "radio", path: "sitio.internet_fincas", label: "¿Las fincas con canecas tienen señal celular?", when: "cooperativa.donde:fincas|ambos",
+        options: [["mayoria", "La mayoría sí"], ["algunas", "Algunas"], ["pocas", "Pocas o ninguna"], NOSE] },
+      { type: "checks", path: "sitio.condiciones", label: "¿Cómo es el ambiente donde irían los equipos?", exclusive: "ninguna",
+        options: [["humedad", "Mucha humedad"], ["lavado", "Se lava con agua a presión"], ["polvo", "Polvo"], ["exterior", "Al aire libre"], ["ninguna", "Nada especial"]] }
+    ]
+  },
+  {
+    id: "plan", name: "Plan y decisión",
+    title: "Cómo le gustaría avanzar",
+    lede: "Con esto armamos la ruta y el calendario.",
+    why: ["La fecha de arranque frente al calendario de cosecha define qué se puede instalar a tiempo.",
+          "Saber quién aprueba y cómo se financia nos permite preparar la propuesta en el formato que la cooperativa necesita."],
+    fields: [
+      { type: "radio", path: "plan.inicio", label: "¿Cuándo le gustaría empezar?",
+        options: [["esta", "En esta cosecha"], ["proxima", "Antes de la próxima cosecha"], ["sin_fecha", "Sin fecha aún"]] },
+      { type: "radio", path: "plan.alcance", label: "¿Cómo prefiere empezar?",
+        options: [["piloto", "Con un piloto pequeño"], ["completo", "Directo con todas las canecas"], ["recomienden", "Recomiéndennos ustedes"]] },
+      { type: "number", path: "plan.piloto_canecas", label: "Si empezamos con un piloto, ¿cuántas canecas incluiría?", unit: "canecas", half: true, when: "plan.alcance:piloto|recomienden" },
+      { type: "checks", path: "plan.operador", label: "¿Quién operaría el sistema día a día?",
+        options: [["beneficio", "Personal del beneficio"], ["laboratorio", "Laboratorio o catadores"], ["socios", "Productores socios"], ["gerencia", "Gerencia o coordinación"], ["otro", "Otro"]] },
+      { type: "number", path: "plan.capacitar", label: "¿Cuántas personas habría que capacitar?", unit: "personas", half: true },
+      { type: "radio", path: "plan.aprueba", label: "¿Quién aprueba un proyecto así?",
+        options: [["gerencia", "La gerencia general"], ["consejo", "El consejo de administración"], ["asamblea", "La asamblea"], ["otro", "Otro"]] },
+      { type: "radio", path: "plan.financiamiento", label: "¿Cómo se financiaría?",
+        options: [["propios", "Con recursos propios"], ["proyecto", "Con un proyecto o cooperación"], ["credito", "Con crédito"], ["sin_definir", "Aún no está definido"]] },
+      { type: "textarea", path: "plan.exito", label: "¿Qué resultado haría que este proyecto valga la pena para la cooperativa?", help: "En sus palabras." }
+    ]
+  },
+  {
+    id: "cierre", name: "Fotos y envío",
+    title: "Lo último",
+    lede: "Las fotos son opcionales y nos ahorran preguntas en la siguiente conversación.",
+    why: ["Una foto de la tapa con el airlock nos dice cómo entraría la sonda.",
+          "Todo queda en una carpeta privada de Tunjo, cubierta por la Política de uso de datos."],
+    fields: [
+      { type: "photos" },
+      { type: "consent", path: "consentimiento" }
+    ]
+  }
+];
+/* =========================================================
+   ESTADO
+   ========================================================= */
+const params = new URLSearchParams(location.search);
+const LEAD = (params.get("lead") || CONFIG.leadPorDefecto).toUpperCase();
+const LEAD_NAME = CONFIG.leads[LEAD] || LEAD;
+const LS_KEY = "tunjo-diag-cocafcal:" + LEAD;
+const LS_PHOTOS = LS_KEY + ":fotos";
+
+let state = { id: null, version: 0, step: 0, answers: {}, sent: false };
+let photos = []; // {slot, name, mime, data}
+
+function uid() {
+  return "D" + Date.now().toString(36).toUpperCase() + Math.random().toString(36).slice(2, 6).toUpperCase();
+}
+function load() {
+  try {
+    const s = JSON.parse(localStorage.getItem(LS_KEY) || "null");
+    if (s && s.answers) state = Object.assign(state, s);
+  } catch (e) {}
+  try { photos = JSON.parse(localStorage.getItem(LS_PHOTOS) || "[]"); } catch (e) { photos = []; }
+  if (!state.id) state.id = uid();
+  if (!get(state.answers, "cooperativa.prioridad")) set(state.answers, "cooperativa.prioridad", ["fermentacion", "secado", "datos"]);
+}
+let saveTimer = null;
+function save() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => {
+    try { localStorage.setItem(LS_KEY, JSON.stringify(state)); flashSaved(); } catch (e) {}
+    try { localStorage.setItem(LS_PHOTOS, JSON.stringify(photos)); } catch (e) {}
+  }, 250);
+}
+function flashSaved() {
+  const el = document.getElementById("saved");
+  if (el) el.textContent = "Guardado en este navegador";
+}
+
+/* Helpers de rutas */
+function get(o, path) { return path.split(".").reduce((x, k) => (x == null ? undefined : x[k]), o); }
+function set(o, path, v) {
+  const ks = path.split("."); let x = o;
+  ks.slice(0, -1).forEach(k => { if (typeof x[k] !== "object" || x[k] === null) x[k] = {}; x = x[k]; });
+  x[ks[ks.length - 1]] = v;
+}
+function has(a, path, v) { const x = get(a, path); return Array.isArray(x) && x.includes(v); }
+function is(a, path, v) { return get(a, path) === v; }
+function whenOk(expr) {
+  if (!expr) return true;
+  const [path, vals] = expr.split(":");
+  const v = get(state.answers, path);
+  const list = vals.split("|");
+  if (Array.isArray(v)) return v.some(x => list.includes(x));
+  return list.includes(v);
+}
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+/* =========================================================
+   RENDER
+   ========================================================= */
+function renderTimeline() {
+  const tl = document.getElementById("timeline");
+  tl.innerHTML = STEPS.map((s, i) => {
+    const cls = i === state.step ? "current" : (i < state.step || stepTouched(i) ? "done" : "");
+    return `<li><button type="button" class="step-btn ${cls}" data-go="${i}" ${i === state.step ? 'aria-current="step"' : ""}>
+      <span class="dot"></span><span class="t">Paso ${i + 1}</span><span class="nm">${s.name}</span></button></li>`;
+  }).join("");
+}
+function stepTouched(i) {
+  return STEPS[i].fields.some(f => f.path && f.type !== "rank" && valuePresent(get(state.answers, f.path)));
+}
+function valuePresent(v) {
+  if (v == null || v === "") return false;
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === "object") return Object.values(v).some(valuePresent);
+  return true;
+}
+
+function renderStep() {
+  const s = STEPS[state.step];
+  const panel = document.getElementById("panel");
+  panel.innerHTML = `
+    <div class="step-panel">
+      <div class="step-grid">
+        <div>
+          <div class="eyebrow">Paso ${state.step + 1} de ${STEPS.length}</div>
+          <h1>${s.title}</h1>
+          <p class="lede">${s.lede}</p>
+          <div class="why why-inline" style="display:none"><h3>Por qué se lo preguntamos</h3>${s.why.map(p => `<p>${p}</p>`).join("")}</div>
+          <div class="fields">${s.fields.map(renderField).join("")}</div>
+          ${state.step === STEPS.length - 1 ? `<div class="hp" aria-hidden="true"><label>No llenar <input type="text" id="hp" tabindex="-1" autocomplete="off"></label></div>` : ""}
+          <div class="status" id="status" role="alert"></div>
+          <div class="nav">
+            ${state.step > 0 ? `<button type="button" class="btn-sec" data-go="${state.step - 1}">Anterior</button>` : `<span class="saved" id="saved"></span>`}
+            ${state.step > 0 ? `<span class="saved" id="saved"></span>` : ""}
+            ${state.step < STEPS.length - 1
+              ? `<button type="button" class="btn" data-next>Siguiente: ${STEPS[state.step + 1].name}</button>`
+              : `<button type="button" class="btn" id="sendBtn">Enviar diagnóstico</button>`}
+          </div>
+        </div>
+        <aside class="why" aria-label="Por qué se lo preguntamos">
+          <h3>Por qué se lo preguntamos</h3>
+          ${s.why.map(p => `<p>${p}</p>`).join("")}
+        </aside>
+      </div>
+    </div>`;
+  document.getElementById("sectionName").innerHTML = `<span class="long">Diagnóstico de fermentación y secado · </span><b>${s.name}</b>`;
+  renderTimeline();
+  refreshVisibility();
+  refreshDerived();
+}
+
+function fieldWrap(f, inner, isGroup) {
+  const tag = isGroup ? "fieldset" : "div";
+  const req = f.required ? ' <span class="req" aria-hidden="true">*</span>' : "";
+  const lab = isGroup ? `<legend>${f.label}${req}</legend>` : `<label class="q" for="f-${f.path}">${f.label}${req}</label>`;
+  return `<${tag} class="field ${f.half ? "half" : ""}" data-field="${f.path || f.type}" ${f.when ? `data-when="${f.when}"` : ""}>
+    ${f.label ? lab : ""}${f.help ? `<p class="help">${f.help}</p>` : ""}${inner}
+    ${f.required ? `<p class="err">Este dato es necesario para continuar.</p>` : ""}</${tag}>`;
+}
+
+function renderField(f) {
+  const v = f.path ? get(state.answers, f.path) : undefined;
+  switch (f.type) {
+    case "text":
+      return fieldWrap(f, `<input type="text" id="f-${f.path}" data-path="${f.path}" value="${esc(v)}" placeholder="${esc(f.placeholder || "")}" ${f.required ? "required" : ""} autocomplete="off">`);
+    case "number":
+      return fieldWrap(f, `<div class="with-unit"><input type="number" inputmode="decimal" min="0" id="f-${f.path}" data-path="${f.path}" value="${esc(v)}"><span>${f.unit || ""}</span></div>`);
+    case "textarea":
+      return fieldWrap(f, `<textarea id="f-${f.path}" data-path="${f.path}">${esc(v)}</textarea>`);
+    case "radio":
+      return fieldWrap(f, `<div class="opts">${f.options.map(([val, lab]) =>
+        `<label class="opt radio ${v === val ? "on" : ""}"><input type="radio" name="${f.path}" value="${val}" data-path="${f.path}" ${v === val ? "checked" : ""}><span class="mk"></span><span>${lab}</span></label>`).join("")}</div>`, true);
+    case "checks": {
+      const arr = Array.isArray(v) ? v : [];
+      return fieldWrap(f, `<div class="opts" data-max="${f.max || ""}">${f.options.map(([val, lab]) =>
+        `<label class="opt ${arr.includes(val) ? "on" : ""}"><input type="checkbox" value="${val}" data-path="${f.path}" data-multi ${f.exclusive ? `data-excl="${f.exclusive}"` : ""} ${arr.includes(val) ? "checked" : ""}><span class="mk"></span><span>${lab}</span></label>`).join("")}</div>`, true);
+    }
+    case "chips": {
+      const arr = Array.isArray(v) ? v : [];
+      const other = get(state.answers, f.path + "_otra") || "";
+      return fieldWrap(f, f.groups.map(([g, opts]) => `<div class="chip-group">${g ? `<h4>${g}</h4>` : ""}<div class="chips">${opts.map(([val, lab]) =>
+        `<label class="chip ${arr.includes(val) ? "on" : ""}"><input type="checkbox" value="${val}" data-path="${f.path}" data-multi data-excl="nose" ${arr.includes(val) ? "checked" : ""}>${lab}</label>`).join("")}</div></div>`).join("")
+        + `<input type="text" class="other-input" data-path="${f.path}_otra" value="${esc(other)}" placeholder="¿Cuál otra?" data-when-local="${f.path}:otra" aria-label="Otra variedad">`, true);
+    }
+    case "rank": {
+      const order = Array.isArray(v) ? v : f.items.map(i => i[0]);
+      const labels = Object.fromEntries(f.items);
+      return fieldWrap(f, `<ol class="rank" data-rank="${f.path}">${order.map((k, i) =>
+        `<li><span class="pos">${i + 1}</span><span class="lbl">${labels[k]}</span><span class="mv">
+          <button type="button" data-mv="-1" data-k="${k}" ${i === 0 ? "disabled" : ""} aria-label="Subir ${labels[k]}">↑</button>
+          <button type="button" data-mv="1" data-k="${k}" ${i === order.length - 1 ? "disabled" : ""} aria-label="Bajar ${labels[k]}">↓</button></span></li>`).join("")}</ol>`, true);
+    }
+    case "percent": {
+      const o = v || {};
+      return fieldWrap(f, `<div class="pct">${f.items.map(([k, lab]) =>
+        `<div><label for="p-${k}">${lab}</label><div class="box"><input type="number" inputmode="numeric" min="0" max="100" id="p-${k}" data-path="${f.path}.${k}" value="${esc(o[k])}"><span>%</span></div></div>`).join("")}</div>
+        <div class="bar" aria-hidden="true">${f.items.map(([k], i) => `<i data-bar="${k}" style="background:${["#116AAB", "#5792C9", "#F58320", "#1C4767"][i]}"></i>`).join("")}</div>
+        <p class="sum" id="pctSum" aria-live="polite"></p>`, true);
+    }
+    case "def":
+      return `<div class="field"><div class="def">
+        <div><b>Medir</b><p>Saber cómo va el proceso. Por ejemplo, leer la temperatura.</p></div>
+        <div class="is-ctrl"><b>Controlar</b><p>Actuar para mantener una variable en un objetivo. Por ejemplo, enfriar cuando pasa de 22 °C.</p></div>
+        <p class="full">En este paso solo preguntamos por control.</p></div></div>`;
+    case "matrix": {
+      const o = v || {};
+      return fieldWrap(f, `<div class="mx" role="group">
+        <div class="mx-row head"><div></div>${f.cols.map(([, l]) => `<div>${l}</div>`).join("")}</div>
+        ${f.rows.map(([rk, rl]) => `<div class="mx-row" role="radiogroup" aria-label="${rl}"><div class="rl">${rl}</div>${f.cols.map(([ck, cl]) =>
+          `<label class="mx-cell ${o[rk] === ck ? "on" : ""}"><input type="radio" name="${f.path}.${rk}" value="${ck}" data-path="${f.path}.${rk}" ${o[rk] === ck ? "checked" : ""} aria-label="${rl}: ${cl}"><span class="mk"></span><span class="ml">${cl}</span></label>`).join("")}</div>`).join("")}
+      </div>`, true);
+    }
+    case "photos":
+      return `<div class="field" data-field="photos"><span class="q" style="display:block;font-size:15px;font-weight:700;color:var(--caption);margin-bottom:4px">Fotos de tus equipos (opcional)</span>
+        <p class="help">Hasta ${CONFIG.maxFotos} fotos. Las reducimos antes de enviarlas para que suban rápido.</p>
+        <div class="photo-slots" id="photoSlots"></div><p class="photo-count" id="photoCount"></p></div>`;
+    case "consent": {
+      const c = !!get(state.answers, f.path);
+      return `<div class="field" data-field="consentimiento"><label class="consent"><input type="checkbox" data-path="consentimiento" data-bool ${c ? "checked" : ""}>
+        <span>He leído la <a href="${esc(CONFIG.politica.url)}" target="_blank" rel="noopener">Política de uso de datos</a> (versión ${esc(CONFIG.politica.version)}), con la que Tunjo Smart Solutions se compromete a mantener confidencial la información de la cooperativa, y autorizo el tratamiento de estos datos solo para preparar el plan y la propuesta, conforme a la Ley 1581 de 2012.</span></label>
+        <p class="err">Necesitamos su autorización para recibir el diagnóstico.</p></div>`;
+    }
+  }
+  return "";
+}
+
+/* Visibilidad condicional y elementos derivados */
+function refreshVisibility() {
+  document.querySelectorAll("[data-when]").forEach(el => { el.hidden = !whenOk(el.dataset.when); });
+  document.querySelectorAll("[data-when-local]").forEach(el => { el.hidden = !whenOk(el.dataset.whenLocal); });
+}
+function refreshDerived() {
+  // Porcentajes
+  const sumEl = document.getElementById("pctSum");
+  if (sumEl) {
+    const o = get(state.answers, "secado.beneficio") || {};
+    const total = Object.values(o).reduce((s, x) => s + (parseFloat(x) || 0), 0);
+    document.querySelectorAll("[data-bar]").forEach(b => {
+      const x = parseFloat(o[b.dataset.bar]) || 0;
+      b.style.width = Math.min(100, total > 100 ? x / total * 100 : x) + "%";
+    });
+    if (total === 0) { sumEl.textContent = ""; sumEl.className = "sum"; }
+    else if (Math.round(total) === 100) { sumEl.textContent = "Suma: 100 %"; sumEl.className = "sum ok"; }
+    else if (total < 100) { sumEl.textContent = `Suma: ${+total.toFixed(1)} %. Falta ${+(100 - total).toFixed(1)} %.`; sumEl.className = "sum warn"; }
+    else { sumEl.textContent = `Suma: ${+total.toFixed(1)} %. Sobra ${+(total - 100).toFixed(1)} %.`; sumEl.className = "sum warn"; }
+  }
+  // Límite de opciones
+  document.querySelectorAll(".opts[data-max]").forEach(g => {
+    const max = parseInt(g.dataset.max); if (!max) return;
+    const n = g.querySelectorAll("input:checked").length;
+    g.querySelectorAll(".opt").forEach(o => {
+      const inp = o.querySelector("input");
+      const block = n >= max && !inp.checked;
+      inp.disabled = block; o.classList.toggle("off", block);
+    });
+  });
+  renderPhotoSlots();
+}
+
+/* =========================================================
+   EVENTOS
+   ========================================================= */
+document.addEventListener("input", e => {
+  const t = e.target;
+  if (!t.dataset || !t.dataset.path || t.type === "checkbox" || t.type === "radio") return;
+  set(state.answers, t.dataset.path, t.type === "number" ? (t.value === "" ? "" : Number(t.value)) : t.value);
+  const fld = t.closest(".field"); if (fld) fld.classList.remove("invalid");
+  refreshDerived(); save();
+});
+
+document.addEventListener("change", e => {
+  const t = e.target;
+  if (!t.dataset || !t.dataset.path) return;
+  const path = t.dataset.path;
+  if (t.dataset.bool !== undefined) {
+    set(state.answers, path, t.checked);
+    t.closest(".field").classList.remove("invalid");
+  } else if (t.type === "radio") {
+    set(state.answers, path, t.value);
+    const scope = t.closest(".opts, .mx-row");
+    scope.querySelectorAll("label").forEach(l => l.classList.toggle("on", l.querySelector("input").checked));
+    const fld = t.closest(".field"); if (fld) fld.classList.remove("invalid");
+  } else if (t.dataset.multi !== undefined) {
+    let arr = (get(state.answers, path) || []).slice();
+    const excl = t.dataset.excl;
+    if (t.checked) {
+      const exclList = excl ? excl.split(",") : [];
+      if (exclList.includes(t.value)) arr = [t.value];
+      else arr = arr.filter(x => !exclList.includes(x)).concat(t.value);
+    } else arr = arr.filter(x => x !== t.value);
+    set(state.answers, path, arr);
+    const scope = t.closest(".field");
+    scope.querySelectorAll("input[data-multi]").forEach(i => {
+      i.checked = arr.includes(i.value);
+      i.closest("label").classList.toggle("on", i.checked);
+    });
+  }
+  refreshVisibility(); refreshDerived(); save();
+});
+
+document.addEventListener("click", e => {
+  const go = e.target.closest("[data-go]");
+  if (go) { goTo(parseInt(go.dataset.go)); return; }
+  if (e.target.closest("[data-next]")) {
+    if (state.step === 0 && !validate([0])) return;
+    goTo(state.step + 1); return;
+  }
+  const mv = e.target.closest("[data-mv]");
+  if (mv) {
+    const path = mv.closest("[data-rank]").dataset.rank;
+    const order = (get(state.answers, path) || []).slice();
+    const i = order.indexOf(mv.dataset.k), j = i + parseInt(mv.dataset.mv);
+    if (j < 0 || j >= order.length) return;
+    [order[i], order[j]] = [order[j], order[i]];
+    set(state.answers, path, order);
+    const f = STEPS[state.step].fields.find(x => x.path === path);
+    const fld = mv.closest(".field");
+    fld.outerHTML = renderField(f);
+    const btn = document.querySelector(`[data-rank="${path}"] [data-k="${mv.dataset.k}"][data-mv="${mv.dataset.mv}"]`);
+    (btn && !btn.disabled ? btn : document.querySelector(`[data-rank="${path}"] [data-k="${mv.dataset.k}"]:not(:disabled)`))?.focus();
+    save(); return;
+  }
+  if (e.target.id === "sendBtn") { submit(); return; }
+  if (e.target.closest("[data-addphoto]")) {
+    const slot = e.target.closest("[data-addphoto]").dataset.addphoto;
+    pickPhoto(slot); return;
+  }
+  const rm = e.target.closest("[data-rmphoto]");
+  if (rm) { photos.splice(parseInt(rm.dataset.rmphoto), 1); renderPhotoSlots(); save(); return; }
+  if (e.target.id === "downloadBtn") { downloadBackup(); return; }
+  if (e.target.id === "editBtn") { state.sent = false; state.step = 0; save(); renderStep(); scrollToForm(); return; }
+});
+
+function goTo(i) {
+  if (state.sent) { state.sent = false; }
+  state.step = Math.max(0, Math.min(STEPS.length - 1, i));
+  save(); renderStep(); scrollToForm();
+}
+function scrollToForm() {
+  const top = document.querySelector(".steps-wrap").getBoundingClientRect().top + window.scrollY - 64;
+  window.scrollTo({ top, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+
+/* =========================================================
+   FOTOS
+   ========================================================= */
+function renderPhotoSlots() {
+  const box = document.getElementById("photoSlots");
+  if (!box) return;
+  const slots = PHOTO_RULES.filter(r => r.when(state.answers));
+  box.innerHTML = slots.map(r => {
+    const mine = photos.map((p, i) => ({ p, i })).filter(x => x.p.slot === r.id);
+    return `<div class="slot"><p>${r.text}</p>
+      <button type="button" class="btn-sec" data-addphoto="${r.id}" ${photos.length >= CONFIG.maxFotos ? "disabled" : ""}>Agregar foto</button>
+      <div class="thumbs">${mine.map(x => `<div class="thumb" style="background-image:url(data:${x.p.mime};base64,${x.p.data})"><button type="button" data-rmphoto="${x.i}" aria-label="Quitar foto">×</button></div>`).join("")}</div></div>`;
+  }).join("");
+  document.getElementById("photoCount").textContent = photos.length ? `${photos.length} de ${CONFIG.maxFotos} fotos` : "";
+}
+function pickPhoto(slot) {
+  const inp = document.createElement("input");
+  inp.type = "file"; inp.accept = "image/*"; inp.multiple = true;
+  inp.onchange = async () => {
+    for (const file of Array.from(inp.files)) {
+      if (photos.length >= CONFIG.maxFotos) break;
+      try {
+        const data = await compress(file);
+        photos.push({ slot, name: `${slot}-${photos.length + 1}.jpg`, mime: "image/jpeg", data });
+      } catch (e) { showStatus("No pudimos leer una de las fotos. Pruebe con otra o envíela después."); }
+    }
+    renderPhotoSlots(); save();
+  };
+  inp.click();
+}
+function compress(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file);
+    const img = new Image();
+    img.onload = () => {
+      const max = 1600, r = Math.min(1, max / Math.max(img.width, img.height));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.width * r); c.height = Math.round(img.height * r);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      res(c.toDataURL("image/jpeg", 0.72).split(",")[1]);
+    };
+    img.onerror = () => { URL.revokeObjectURL(url); rej(new Error("img")); };
+    img.src = url;
+  });
+}
+
+/* =========================================================
+   VALIDACIÓN Y ENVÍO
+   ========================================================= */
+function validate(stepsIdx) {
+  for (const si of stepsIdx) {
+    const s = STEPS[si];
+    const missing = s.fields.filter(f => f.required && !valuePresent(get(state.answers, f.path)));
+    if (missing.length) {
+      if (state.step !== si) { state.step = si; renderStep(); }
+      missing.forEach(f => document.querySelector(`[data-field="${f.path}"]`)?.classList.add("invalid"));
+      const first = document.querySelector(".field.invalid input, .field.invalid");
+      first?.focus?.(); scrollToForm();
+      return false;
+    }
+  }
+  return true;
+}
+
+function pruned() {
+  const out = JSON.parse(JSON.stringify(state.answers));
+  STEPS.forEach(s => s.fields.forEach(f => {
+    if (f.when && !whenOk(f.when)) {
+      const ks = f.path.split("."); const parent = get(out, ks.slice(0, -1).join("."));
+      if (parent) delete parent[ks[ks.length - 1]];
+    }
+  }));
+  if (!has(state.answers, "fermentadores.variedades", "otra") && out.fermentadores) delete out.fermentadores.variedades_otra;
+  return out;
+}
+
+function buildPayload() {
+  return {
+    token: CONFIG.token,
+    hp: (document.getElementById("hp") || {}).value || "",
+    id: state.id,
+    version: state.version + 1,
+    lead: LEAD,
+    lead_name: LEAD_NAME,
+    submitted_at: new Date().toISOString(),
+    answers: pruned(),
+    politica_version: CONFIG.politica.version,
+    politica_url: CONFIG.politica.url,
+    photos: photos.map(p => ({ slot: p.slot, name: p.name, mime: p.mime, data: p.data }))
+  };
+}
+
+async function submit() {
+  if (!validate([0])) return;
+  if (!get(state.answers, "consentimiento")) {
+    document.querySelector('[data-field="consentimiento"]').classList.add("invalid");
+    document.querySelector('[data-path="consentimiento"]').focus();
+    return;
+  }
+  const btn = document.getElementById("sendBtn");
+  const payload = buildPayload();
+  if (!CONFIG.endpoint) {
+    showStatus("Este formulario todavía no tiene activo el envío. Descargue una copia de sus respuestas y compártala con nosotros.", true);
+    return;
+  }
+  btn.disabled = true; btn.textContent = "Enviando…";
+  try {
+    const r = await fetch(CONFIG.endpoint, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body: JSON.stringify(payload) });
+    let ok = r.ok;
+    try { const j = await r.json(); ok = ok && j.ok !== false; } catch (e) {}
+    if (!ok) throw new Error("respuesta");
+    state.version = payload.version; state.sent = true; save();
+    renderDone();
+  } catch (e) {
+    btn.disabled = false; btn.textContent = "Enviar diagnóstico";
+    showStatus("No se pudo enviar. Revise su conexión e inténtelo de nuevo: sus respuestas siguen guardadas aquí.", true);
+  }
+}
+function showStatus(msg, withDownload) {
+  const s = document.getElementById("status");
+  if (!s) return;
+  s.innerHTML = esc(msg) + (withDownload ? `<br><button type="button" class="btn-sec" id="downloadBtn">Descargar copia de sus respuestas</button>` : "");
+  s.classList.add("show");
+}
+function downloadBackup() {
+  const p = buildPayload(); delete p.token;
+  const blob = new Blob([JSON.stringify(p, null, 2)], { type: "application/json" });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob); a.download = `diagnostico-${LEAD}-${state.id}.json`;
+  document.body.appendChild(a); a.click(); a.remove();
+}
+
+/* =========================================================
+   PANTALLA FINAL
+   ========================================================= */
+function renderDone() {
+  const a = state.answers;
+  const pending = PHOTO_RULES.filter(r => r.when(a) && !photos.some(p => p.slot === r.id));
+  const prep = NDA_RULES.filter(r => r.when(a)).slice(0, CONFIG.maxItemsChecklist);
+  const fases = buildPlan(a);
+  const nombre = (get(a, "cooperativa.nombre") || "").trim().split(" ")[0];
+  document.getElementById("panel").innerHTML = `
+    <div class="step-panel">
+      <div class="eyebrow">Diagnóstico enviado</div>
+      <h1>Gracias${nombre ? ", " + esc(nombre) : ""}. Recibimos el diagnóstico de la cooperativa.</h1>
+      <p class="lede">Con esto preparamos el plan detallado y lo revisamos juntos. Si necesita cambiar algo, puede volver a este enlace y enviarlo de nuevo.</p>
+      <div class="done-grid">
+        <div>
+          <h2>Ruta preliminar</h2>
+          <p class="small" style="margin-top:4px">La ajustamos juntos en la siguiente conversación.</p>
+          <ol class="phases">${fases.map((f, i) => `<li class="${i === 0 ? "first" : ""}"><span class="pn">${f.n}</span><div><b>${esc(f.t)}</b><span>${esc(f.d)}</span></div></li>`).join("")}</ol>
+          ${pending.length ? `<div class="photos-todo"><h2>Fotos que nos ayudarían</h2><ul>${pending.map(r => `<li>${r.text}</li>`).join("")}</ul>
+            <p class="small">Puede agregarlas en el último paso y enviar de nuevo.</p></div>` : ""}
+          <p class="small" style="margin-top:22px">Referencia ${esc(state.id)} · versión ${state.version} · Política de uso de datos ${esc(CONFIG.politica.version)}</p>
+          <div class="nav"><button type="button" class="btn-sec" id="editBtn">Revisar mis respuestas</button><span></span></div>
+        </div>
+        <section class="next" aria-labelledby="prep-title">
+          <h2 id="prep-title">Lo que conviene preparar</h2>
+          <p class="sub">Para la conversación en la que revisamos el plan.</p>
+          <ol>${prep.map(r => `<li><div><b>${r.text}</b><span>${r.detail || ""}</span></div></li>`).join("")}</ol>
+          <div class="ask">Gracias por la confianza. Hablamos pronto.</div>
+        </section>
+      </div>
+    </div>`;
+  document.getElementById("sectionName").innerHTML = `<span class="long">Diagnóstico de fermentación y secado · </span><b>Enviado</b>`;
+  document.querySelectorAll(".step-btn").forEach(b => { b.classList.remove("current"); b.classList.add("done"); b.removeAttribute("aria-current"); });
+  scrollToForm();
+}
+/* =========================================================
+   INICIO
+   ========================================================= */
+function initAssets() {
+  const top = document.getElementById("logoTop");
+  top.src = ASSETS.logoPropio;
+  top.onerror = () => { top.replaceWith(Object.assign(document.createElement("span"), { className: "logo-fallback", textContent: "Tunjo" })); };
+  const w = document.getElementById("logoWhite");
+  w.src = ASSETS.logoBlanco; w.onerror = () => w.remove();
+  if (ASSETS.portada) document.querySelector(".cover-hero").style.backgroundImage = `url("${ASSETS.portada}")`;
+  document.querySelectorAll("[data-lead-name]").forEach(el => el.textContent = LEAD_NAME);
+  document.querySelectorAll("[data-policy-link]").forEach(el => el.href = CONFIG.politica.url);
+}
+initAssets();
+load();
+if (state.sent) { renderTimeline(); renderDone(); window.scrollTo(0, 0); } else { renderStep(); }
+</script>
+</body>
+</html>
